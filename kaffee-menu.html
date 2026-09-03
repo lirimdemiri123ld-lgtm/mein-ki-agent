@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaffee-Menü</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,WONK@9..144,100..900,0..1&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --text:#F3E7D6;
+    --pad:clamp(18px,4.2vw,60px);
+    --enter-ease:cubic-bezier(.16,1,.3,1);
+    --exit-ease:cubic-bezier(.7,0,.84,0);
+    --rail-ease:cubic-bezier(.72,0,.16,1);
+    --rail-duration:980ms;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;background:#000;}
+  body{
+    font-family:'Fraunces',Georgia,serif;
+    color:var(--text);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  .stage{
+    position:relative;
+    width:100vw;height:100vh;height:100dvh;
+    overflow:hidden;
+  }
+  .rail{
+    transition:transform var(--rail-duration) var(--rail-ease);
+    will-change:transform;
+  }
+  .screen{
+    position:relative;
+    width:100vw;height:100vh;height:100dvh;
+    background:var(--bg);
+    overflow:hidden;
+  }
+
+  /* ---- badge ---- */
+  .badge-wrap{
+    position:absolute;top:var(--pad);left:var(--pad);
+    display:flex;align-items:center;gap:.55em;
+    z-index:4;
+  }
+  .badge-ring{width:30px;height:30px;flex:none;}
+  .badge-ring circle{fill:none;stroke:var(--text);stroke-width:1.6;}
+  .badge-ring .bean{fill:var(--text);}
+  .wordmark{
+    font-size:15px;
+    font-variation-settings:'opsz' 9,'wght' 600;
+    letter-spacing:.01em;
+  }
+
+  /* ---- number ---- */
+  .number{
+    position:absolute;left:var(--pad);top:calc(var(--pad) + 46px);
+    font-size:13px;
+    font-variation-settings:'opsz' 9,'wght' 500;
+    opacity:.85;
+    letter-spacing:.03em;
+    z-index:4;
+  }
+
+  /* ---- name ---- */
+  .name-mask{
+    position:absolute;left:var(--pad);right:var(--pad);
+    top:calc(var(--pad) + 92px);
+    overflow:hidden;
+    z-index:3;
+    pointer-events:none;
+  }
+  .name{
+    margin:0;
+    font-weight:800;
+    font-variation-settings:'opsz' 144,'wght' 800,'WONK' 1;
+    font-size:clamp(3rem,13vw,11rem);
+    line-height:.85;
+    letter-spacing:-.025em;
+    transform:translateY(112%);
+  }
+
+  /* ---- image ---- */
+  .image-wrap{
+    position:absolute;
+    left:50%;top:8vh;
+    transform:translateX(-50%);
+    width:min(64vh,88vw);
+    aspect-ratio:1/1;
+    z-index:2;
+    pointer-events:none;
+  }
+  .drink-img{width:100%;height:100%;display:block;}
+  .screen[data-anim="slide"] .drink-img{transform:translateY(66%) scale(1.05);opacity:0;}
+  .screen[data-anim="zoom"] .drink-img{transform:scale(1.42);opacity:0;}
+
+  /* ---- price / button ---- */
+  .price{
+    position:absolute;left:var(--pad);bottom:var(--pad);
+    font-size:clamp(1.1rem,2.2vw,1.6rem);
+    font-variation-settings:'opsz' 9,'wght' 600;
+    transform:translateY(16px);opacity:0;
+    z-index:4;
+  }
+  .order-btn{
+    position:absolute;right:var(--pad);bottom:var(--pad);
+    font-family:inherit;
+    color:var(--bg);
+    background:var(--text);
+    border:none;border-radius:999px;
+    padding:.85em 1.6em;
+    font-size:clamp(.95rem,1.6vw,1.15rem);
+    font-variation-settings:'opsz' 9,'wght' 600;
+    cursor:pointer;
+    transform:translateY(16px);opacity:0;
+    z-index:4;
+    transition:transform .25s var(--enter-ease);
+  }
+  .order-btn:hover{transform:translateY(-2px);}
+  .order-btn.is-on{transform:none;opacity:1;}
+
+  .number.is-on,.price.is-on{transform:none;opacity:1;}
+  .name-mask .name.is-on{transform:none;}
+  .drink-img.is-on{transform:none;opacity:1;}
+
+  /* focus */
+  .stage:focus-visible,.order-btn:focus-visible{
+    outline:2px solid var(--text);
+    outline-offset:4px;
+  }
+
+  /* ---- coffee bean layer ---- */
+  .beans-layer{
+    position:absolute;inset:0;
+    z-index:3;
+    pointer-events:none;
+    overflow:hidden;
+  }
+  .bean-svg{position:absolute;top:0;left:0;will-change:transform,opacity;}
+
+  .sr-only{
+    position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+    overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .rail{transition:transform 1ms linear;}
+    .name.is-on,.name{transform:none;}
+    .number,.price,.order-btn,.drink-img{transform:none !important;opacity:1 !important;}
+    .order-btn{transition:none;}
+  }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage" tabindex="0" aria-roledescription="carousel" aria-label="Kaffee-Menü">
+  <div class="rail" id="rail"></div>
+  <div class="beans-layer" id="beansLayer" aria-hidden="true"></div>
+</div>
+
+<div id="liveRegion" class="sr-only" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* =========================================================
+     KONFIGURATION — ein anderes Foto einsetzen heisst hier
+     nur, den `img`-Eintrag zu ersetzen (Markup oder Data-URI).
+     Mangels Bildgenerator werden freigestellte SVG-Illustrationen
+     als Platzhalter für echte Produktfotos verwendet.
+  ========================================================= */
+  const DRINKS = [
+    { name:"Latte",      price:"CHF 5.20", bg:"#96652F", anim:"slide", img:svgLatte() },
+    { name:"Mocha",      price:"CHF 5.80", bg:"#3E2A24", anim:"zoom",  img:svgMocha() },
+    { name:"Americano",  price:"CHF 4.40", bg:"#1E1714", anim:"slide", img:svgAmericano() },
+    { name:"Cappuccino", price:"CHF 4.90", bg:"#5C3B28", anim:"zoom",  img:svgCappuccino() },
+    { name:"Cold Brew",  price:"CHF 6.10", bg:"#2B3A33", anim:"slide", img:svgColdBrew() },
+  ];
+
+  const ENTER_START_DELAY = 340;   // ms nach Beginn der Bewegung
+  const LOCK_DURATION      = 1280; // 340 + 940
+  const EXIT_DURATION      = 520;
+  const ENTER_EASE = 'cubic-bezier(.16,1,.3,1)';
+  const EXIT_EASE  = 'cubic-bezier(.7,0,.84,0)';
+
+  const ENTER_TIMING = {
+    image:  { delay: 30,  duration: 820 },
+    name:   { delay: 180, duration: 620 },
+    number: { delay: 250, duration: 560 },
+    price:  { delay: 320, duration: 560 },
+    button: { delay: 380, duration: 560 },
+  };
+
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------------- DOM aufbauen ---------------- */
+  const rail = document.getElementById('rail');
+  const stage = document.getElementById('stage');
+  const beansLayer = document.getElementById('beansLayer');
+  const liveRegion = document.getElementById('liveRegion');
+
+  const total = DRINKS.length;
+  const sections = DRINKS.map((drink, i) => buildScreen(drink, i, total));
+  sections.forEach(s => rail.appendChild(s.el));
+
+  function pad2(n){ return String(n).padStart(2,'0'); }
+
+  function buildScreen(drink, index, total){
+    const el = document.createElement('section');
+    el.className = 'screen';
+    el.style.setProperty('--bg', drink.bg);
+    el.dataset.anim = drink.anim;
+    el.setAttribute('role','group');
+    el.setAttribute('aria-roledescription','slide');
+    el.setAttribute('aria-label', drink.name + ', ' + (index+1) + ' von ' + total);
+
+    const badgeWrap = document.createElement('div');
+    badgeWrap.className = 'badge-wrap';
+    badgeWrap.innerHTML =
+      '<svg class="badge-ring" viewBox="0 0 32 32" aria-hidden="true">' +
+        '<circle cx="16" cy="16" r="13.5"/>' +
+        '<circle class="bean" cx="16" cy="16" r="3.4"/>' +
+      '</svg>' +
+      '<span class="wordmark">Bohne</span>';
+
+    const number = document.createElement('div');
+    number.className = 'number';
+    number.textContent = pad2(index+1) + ' / ' + pad2(total);
+
+    const nameMask = document.createElement('div');
+    nameMask.className = 'name-mask';
+    const name = document.createElement('h2');
+    name.className = 'name';
+    name.textContent = drink.name;
+    nameMask.appendChild(name);
+
+    const imageWrap = document.createElement('div');
+    imageWrap.className = 'image-wrap';
+    imageWrap.innerHTML = drink.img;
+    const img = imageWrap.querySelector('svg');
+    img.classList.add('drink-img');
+
+    const price = document.createElement('div');
+    price.className = 'price';
+    price.textContent = drink.price;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'order-btn';
+    button.textContent = 'Bestellen';
+    button.addEventListener('click', () => {
+      if (button.dataset.busy) return;
+      button.dataset.busy = '1';
+      button.textContent = 'Bestellt';
+      liveRegion.textContent = drink.name + ' bestellt.';
+      setTimeout(() => {
+        button.textContent = 'Bestellen';
+        delete button.dataset.busy;
+      }, 1600);
+    });
+
+    el.append(badgeWrap, number, nameMask, imageWrap, price, button);
+
+    return { el, image: img, name, number, price, button, anim: drink.anim };
+  }
+
+  /* ---------------- Zustände (pre/on/post) ---------------- */
+  function preImageTransform(anim){
+    return anim === 'zoom' ? 'scale(1.42)' : 'translateY(66%) scale(1.05)';
+  }
+  function postImageTransform(anim){
+    return anim === 'zoom' ? 'scale(1.38)' : 'translateY(-58%) scale(.96)';
+  }
+
+  function setInstant(section, state){
+    // state: 'pre' | 'on' | 'post' — ohne Animation
+    const { image, name, number, price, button, anim } = section;
+    if (state === 'on'){
+      image.style.transform = 'none'; image.style.opacity = '1';
+      name.style.transform = 'none';
+      number.style.transform = 'none'; number.style.opacity = '1';
+      price.style.transform = 'none'; price.style.opacity = '1';
+      button.style.transform = 'none'; button.style.opacity = '1';
+    } else if (state === 'pre'){
+      image.style.transform = preImageTransform(anim); image.style.opacity = '0';
+      name.style.transform = 'translateY(112%)';
+      number.style.transform = 'translateY(16px)'; number.style.opacity = '0';
+      price.style.transform = 'translateY(16px)'; price.style.opacity = '0';
+      button.style.transform = 'translateY(16px)'; button.style.opacity = '0';
+    } else {
+      image.style.transform = postImageTransform(anim); image.style.opacity = '0';
+      name.style.transform = 'translateY(-30%)';
+      number.style.transform = 'translateY(-16px)'; number.style.opacity = '0';
+      price.style.transform = 'translateY(-16px)'; price.style.opacity = '0';
+      button.style.transform = 'translateY(-16px)'; button.style.opacity = '0';
+    }
+  }
+
+  function animateEl(el, fromT, toT, fromO, toO, delay, duration, easing){
+    const anim = el.animate(
+      [
+        { transform: fromT, opacity: fromO },
+        { transform: toT,   opacity: toO   },
+      ],
+      { delay, duration, easing, fill: 'forwards' }
+    );
+    anim.onfinish = () => {
+      try { anim.commitStyles(); } catch(e){}
+      anim.cancel();
+    };
+    return anim;
+  }
+
+  function playEnter(section){
+    const { image, name, number, price, button, anim } = section;
+    const t = ENTER_TIMING;
+    animateEl(image,  preImageTransform(anim), 'none', 0, 1, t.image.delay,  t.image.duration,  ENTER_EASE);
+    animateEl(name,   'translateY(112%)', 'none', 1, 1,   t.name.delay,   t.name.duration,   ENTER_EASE);
+    animateEl(number, 'translateY(16px)', 'none', 0, 1,   t.number.delay, t.number.duration, ENTER_EASE);
+    animateEl(price,  'translateY(16px)', 'none', 0, 1,   t.price.delay,  t.price.duration,  ENTER_EASE);
+    animateEl(button, 'translateY(16px)', 'none', 0, 1,   t.button.delay, t.button.duration, ENTER_EASE);
+  }
+
+  function playExit(section){
+    const { image, name, number, price, button, anim } = section;
+    animateEl(image,  'none', postImageTransform(anim), 1, 0, 0, EXIT_DURATION, EXIT_EASE);
+    animateEl(name,   'none', 'translateY(-30%)',        1, 1, 0, EXIT_DURATION, EXIT_EASE);
+    animateEl(number, 'none', 'translateY(-16px)',       1, 0, 0, EXIT_DURATION, EXIT_EASE);
+    animateEl(price,  'none', 'translateY(-16px)',       1, 0, 0, EXIT_DURATION, EXIT_EASE);
+    animateEl(button, 'none', 'translateY(-16px)',       1, 0, 0, EXIT_DURATION, EXIT_EASE);
+  }
+
+  /* ---------------- Bohnen ---------------- */
+  function rand(min, max){ return min + Math.random() * (max - min); }
+
+  function beanSVG(size){
+    return '<svg class="bean-svg" width="'+size+'" height="'+(size*0.62)+'" viewBox="0 0 40 25" aria-hidden="true">' +
+      '<ellipse cx="20" cy="12.5" rx="19" ry="11.5" fill="#6B4226"/>' +
+      '<path d="M20 2 C13 9,13 16,20 23" stroke="#3B2115" stroke-width="2" fill="none" stroke-linecap="round"/>' +
+      '<ellipse cx="9" cy="7.5" rx="5.2" ry="3" fill="#B98356" opacity=".55"/>' +
+    '</svg>';
+  }
+
+  function spawnBeans(direction){
+    if (reduced) return;
+    const rect = stage.getBoundingClientRect();
+    for (let i = 0; i < 13; i++){
+      const size = rand(15, 42);
+      const x = rand(2, 98);
+      const driftX = rand(-80, 80);
+      const rotation = rand(-560, 560) * (Math.random() < 0.5 ? -1 : 1);
+      const duration = rand(900, 1550);
+      const delay = rand(0, 280);
+      const opacity = rand(0.5, 0.9);
+      const blur = size > 33 ? 'blur(1.3px)' : 'none';
+
+      const wrap = document.createElement('div');
+      wrap.innerHTML = beanSVG(size);
+      const bean = wrap.firstElementChild;
+      bean.style.left = x + 'vw';
+      bean.style.filter = blur;
+      beansLayer.appendChild(bean);
+
+      const startY = direction === 'next' ? rect.height * 1.1 : -rect.height * 0.15;
+      const endY   = direction === 'next' ? -rect.height * 0.15 : rect.height * 1.1;
+      const startRot = 0;
+
+      const anim = bean.animate(
+        [
+          { transform: 'translate(0px,' + startY + 'px) rotate(' + startRot + 'deg)', opacity: 0 },
+          { transform: 'translate(' + (driftX*0.5) + 'px,' + ((startY+endY)/2) + 'px) rotate(' + (rotation/2) + 'deg)', opacity },
+          { transform: 'translate(' + driftX + 'px,' + endY + 'px) rotate(' + rotation + 'deg)', opacity: 0 },
+        ],
+        { delay, duration, easing: 'cubic-bezier(.33,.1,.3,1)', fill: 'forwards' }
+      );
+      anim.onfinish = () => bean.remove();
+    }
+  }
+
+  /* ---------------- Navigation / Rail ---------------- */
+  let currentIndex = 0;
+  let locked = false;
+  let pending = null;
+
+  sections.forEach((s, i) => setInstant(s, i === 0 ? 'on' : 'pre'));
+
+  function railHeight(){ return stage.getBoundingClientRect().height; }
+
+  function moveRail(index){
+    rail.style.transform = 'translateY(-' + (index * railHeight()) + 'px)';
+  }
+
+  function goTo(newIndex){
+    if (newIndex < 0 || newIndex >= total || newIndex === currentIndex) return;
+    if (locked){
+      if (pending === null) pending = newIndex;
+      return;
+    }
+    locked = true;
+    const direction = newIndex > currentIndex ? 'next' : 'prev';
+    const prevSection = sections[currentIndex];
+    const nextSection = sections[newIndex];
+
+    playExit(prevSection);
+    moveRail(newIndex);
+    spawnBeans(direction);
+
+    const enterDelay = reduced ? 0 : ENTER_START_DELAY;
+    setTimeout(() => { playEnter(nextSection); }, enterDelay);
+
+    const lockDuration = reduced ? 60 : LOCK_DURATION;
+    setTimeout(() => {
+      locked = false;
+      currentIndex = newIndex;
+      liveRegion.textContent = DRINKS[newIndex].name + ', ' + (newIndex+1) + ' von ' + total;
+      if (pending !== null){
+        const p = pending;
+        pending = null;
+        goTo(p);
+      }
+    }, lockDuration);
+  }
+
+  window.addEventListener('resize', () => {
+    const prevTransition = rail.style.transition;
+    rail.style.transition = 'none';
+    moveRail(currentIndex);
+    // Reflow erzwingen, danach Übergang wiederherstellen.
+    void rail.offsetHeight;
+    rail.style.transition = prevTransition;
+  });
+
+  /* ---------------- Eingaben ---------------- */
+  let wheelCooldown = false;
+  stage.addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaY) < 30) return;
+    e.preventDefault();
+    goTo(currentIndex + (e.deltaY > 0 ? 1 : -1));
+  }, { passive: false });
+
+  let touchStartY = null;
+  stage.addEventListener('touchstart', (e) => {
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+  stage.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+  }, { passive: false });
+  stage.addEventListener('touchend', (e) => {
+    if (touchStartY === null) return;
+    const dy = touchStartY - e.changedTouches[0].clientY;
+    touchStartY = null;
+    if (Math.abs(dy) < 40) return;
+    goTo(currentIndex + (dy > 0 ? 1 : -1));
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target && e.target.tagName === 'BUTTON') return;
+    switch (e.key){
+      case 'ArrowDown': case 'PageDown': case ' ':
+        e.preventDefault(); goTo(currentIndex + 1); break;
+      case 'ArrowUp': case 'PageUp':
+        e.preventDefault(); goTo(currentIndex - 1); break;
+      case 'Home':
+        e.preventDefault(); goTo(0); break;
+      case 'End':
+        e.preventDefault(); goTo(total - 1); break;
+    }
+  });
+
+  moveRail(0);
+
+  /* =========================================================
+     Illustrationen (Ersatz für Produktfotos) — je Getränk ein
+     freistehendes SVG auf 1000x1000 Leinwand, zentriert, mit
+     weichem Kontaktschatten.
+  ========================================================= */
+  function shadow(){
+    return '<ellipse cx="500" cy="890" rx="240" ry="34" fill="#000" opacity=".28"/>' +
+           '<ellipse cx="500" cy="890" rx="150" ry="20" fill="#000" opacity=".22"/>';
+  }
+
+  function svgLatte(){
+    return '<svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">' +
+      '<defs><linearGradient id="lgGlass" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="#EDE0C8"/><stop offset=".22" stop-color="#C89A5B"/>' +
+        '<stop offset="1" stop-color="#6B4123"/></linearGradient></defs>' +
+      shadow() +
+      '<path d="M370 260 L630 260 L610 830 Q610 860 580 860 L420 860 Q390 860 390 830 Z" ' +
+        'fill="url(#lgGlass)" stroke="#3B2115" stroke-width="4"/>' +
+      '<ellipse cx="500" cy="262" rx="130" ry="26" fill="#F4E9D6"/>' +
+      '<path d="M420 262 Q500 300 580 262" stroke="#B9834B" stroke-width="6" fill="none" opacity=".7"/>' +
+      '<ellipse cx="500" cy="838" rx="95" ry="16" fill="#3B2115" opacity=".5"/>' +
+    '</svg>';
+  }
+
+  function svgMocha(){
+    return '<svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">' +
+      '<defs><linearGradient id="mgCup" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="#5B3A2A"/><stop offset="1" stop-color="#2E1B12"/>' +
+      '</linearGradient></defs>' +
+      shadow() +
+      '<path d="M350 330 L650 330 L622 800 Q618 840 578 840 L422 840 Q382 840 378 800 Z" ' +
+        'fill="url(#mgCup)" stroke="#1C0F09" stroke-width="4"/>' +
+      '<path d="M645 420 Q760 420 755 520 Q750 610 645 605" fill="none" stroke="#2E1B12" stroke-width="26" stroke-linecap="round"/>' +
+      '<ellipse cx="500" cy="332" rx="150" ry="28" fill="#F3E6D2"/>' +
+      '<path d="M400 300 Q500 250 600 300 Q560 340 500 335 Q440 340 400 300Z" fill="#F3E6D2"/>' +
+      '<path d="M420 310 Q500 360 580 310" stroke="#6B4226" stroke-width="8" fill="none" opacity=".8"/>' +
+      '<path d="M440 300 Q470 260 500 300" stroke="#6B4226" stroke-width="6" fill="none" opacity=".6"/>' +
+    '</svg>';
+  }
+
+  function svgAmericano(){
+    return '<svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">' +
+      '<defs><radialGradient id="agCoffee" cx=".4" cy=".35" r=".8">' +
+        '<stop offset="0" stop-color="#3B2013"/><stop offset="1" stop-color="#150B06"/>' +
+      '</radialGradient></defs>' +
+      shadow() +
+      '<ellipse cx="500" cy="840" rx="230" ry="28" fill="#221510" opacity=".8"/>' +
+      '<path d="M368 330 L632 330 L604 810 Q600 848 562 848 L438 848 Q400 848 396 810 Z" ' +
+        'fill="#241209" stroke="#0E0704" stroke-width="4"/>' +
+      '<ellipse cx="500" cy="332" rx="132" ry="24" fill="url(#agCoffee)"/>' +
+      '<path d="M455 318 Q480 305 520 318" stroke="#7A5233" stroke-width="4" fill="none" opacity=".5"/>' +
+      '<path d="M420 220 Q400 180 430 140" stroke="#EFE3D0" stroke-width="6" fill="none" opacity=".35" stroke-linecap="round"/>' +
+      '<path d="M480 210 Q460 165 495 125" stroke="#EFE3D0" stroke-width="6" fill="none" opacity=".3" stroke-linecap="round"/>' +
+    '</svg>';
+  }
+
+  function svgCappuccino(){
+    return '<svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">' +
+      '<defs><radialGradient id="cgFoam" cx=".4" cy=".3" r=".9">' +
+        '<stop offset="0" stop-color="#FBF3E4"/><stop offset="1" stop-color="#E4CFA6"/>' +
+      '</radialGradient></defs>' +
+      shadow() +
+      '<ellipse cx="500" cy="600" rx="290" ry="40" fill="#4A2E1C" opacity=".55"/>' +
+      '<path d="M320 380 L680 380 L648 590 Q640 630 590 630 L410 630 Q360 630 352 590 Z" ' +
+        'fill="#4A2E1C" stroke="#241206" stroke-width="4"/>' +
+      '<ellipse cx="500" cy="382" rx="180" ry="34" fill="url(#cgFoam)"/>' +
+      '<circle cx="450" cy="378" r="4" fill="#8B5A34" opacity=".6"/>' +
+      '<circle cx="500" cy="370" r="4" fill="#8B5A34" opacity=".6"/>' +
+      '<circle cx="545" cy="382" r="4" fill="#8B5A34" opacity=".6"/>' +
+      '<circle cx="475" cy="392" r="4" fill="#8B5A34" opacity=".5"/>' +
+      '<circle cx="525" cy="395" r="4" fill="#8B5A34" opacity=".5"/>' +
+      '<path d="M680 460 Q760 470 745 530 Q735 570 680 560" fill="none" stroke="#3A2314" stroke-width="22" stroke-linecap="round"/>' +
+    '</svg>';
+  }
+
+  function svgColdBrew(){
+    return '<svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">' +
+      '<defs><linearGradient id="cbLiquid" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="#3B2415"/><stop offset="1" stop-color="#170D07"/>' +
+      '</linearGradient></defs>' +
+      shadow() +
+      '<path d="M380 220 L620 220 L600 850 Q598 875 572 875 L428 875 Q402 875 400 850 Z" ' +
+        'fill="none" stroke="#DDD3C0" stroke-width="5" opacity=".55"/>' +
+      '<path d="M392 400 L608 400 L596 848 Q594 866 574 866 L426 866 Q406 866 404 848 Z" fill="url(#cbLiquid)"/>' +
+      '<rect x="430" y="330" width="70" height="70" rx="14" fill="#EAF2EE" opacity=".8"/>' +
+      '<rect x="500" y="380" width="60" height="60" rx="13" fill="#EAF2EE" opacity=".7"/>' +
+      '<rect x="440" y="440" width="55" height="55" rx="12" fill="#EAF2EE" opacity=".55"/>' +
+      '<line x1="560" y1="150" x2="480" y2="470" stroke="#F3E7D6" stroke-width="10" stroke-linecap="round" opacity=".85"/>' +
+      '<circle cx="420" cy="600" r="4" fill="#DDD3C0" opacity=".5"/>' +
+      '<circle cx="580" cy="700" r="3" fill="#DDD3C0" opacity=".5"/>' +
+      '<circle cx="410" cy="740" r="3.5" fill="#DDD3C0" opacity=".45"/>' +
+    '</svg>';
+  }
+
+})();
+</script>
+</body>
+</html>
