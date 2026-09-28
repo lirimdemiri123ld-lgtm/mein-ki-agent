@@ -43,3 +43,16 @@ Laufband, CSS-Scroll-Reveals und Kontaktformular (Demo, ohne Backend).
 Einfach die Datei im Browser öffnen, es wird nichts installiert. Three.js und
 die Schriften werden per CDN geladen. Texte, Farben und Schriften lassen sich
 oben in der Datei im `:root`-Block und im HTML anpassen.
+
+## Uhren-Shop (uhren-shop/)
+
+Eigenständige Shop-Website für den Uhrenverkäufer, als Ersatz für den
+Ricardo-Shop. `uhren-shop/index.html` öffnen, kein Build nötig.
+
+- `produkte.js`: die 31 Uhren mit Titel, Marke, Kategorie, Werk, Preis (CHF)
+  und Bildpfad. Neue Uhr = neuer Eintrag in dieser Liste.
+- `bilder/`: Produktfotos, benannt nach der Ricardo-Angebotsnummer.
+- 3D-Uhr in Three.js, die die echte Uhrzeit zeigt, sich beim Scrollen um die
+  eigene Achse dreht (Zifferblatt vorne, Werk hinten) und der Maus folgt.
+- Filter nach Kategorie, Marke, Automatik und Swiss Made, Sortierung nach Preis,
+  Detail-Dialog pro Uhr und Anfrageformular (Demo, ohne Backend).
