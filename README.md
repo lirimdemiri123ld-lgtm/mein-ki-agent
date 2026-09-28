@@ -49,10 +49,13 @@ oben in der Datei im `:root`-Block und im HTML anpassen.
 Eigenständige Shop-Website für den Uhrenverkäufer, als Ersatz für den
 Ricardo-Shop. `uhren-shop/index.html` öffnen, kein Build nötig.
 
-- `produkte.js`: die 31 Uhren mit Titel, Marke, Kategorie, Werk, Preis (CHF)
-  und Bildpfad. Neue Uhr = neuer Eintrag in dieser Liste.
-- `bilder/`: Produktfotos, benannt nach der Ricardo-Angebotsnummer.
-- 3D-Uhr in Three.js, die die echte Uhrzeit zeigt, sich beim Scrollen um die
-  eigene Achse dreht (Zifferblatt vorne, Werk hinten) und der Maus folgt.
-- Filter nach Kategorie, Marke, Automatik und Swiss Made, Sortierung nach Preis,
-  Detail-Dialog pro Uhr und Anfrageformular (Demo, ohne Backend).
+- `produkte.js`: die 31 Uhren mit Titel, Marke, Kategorie, Werk, Zustand,
+  Versandart und -kosten, Standort, Preis (CHF) und Bildliste. Neue Uhr =
+  neuer Eintrag in dieser Liste.
+- `bilder/`: Produktfotos, benannt nach der Ricardo-Angebotsnummer. Weitere
+  Fotos einer Uhr als `bilder/<id>-2.jpg`, `bilder/<id>-3.jpg` usw. ablegen,
+  die Galerie im Detail-Dialog erkennt sie automatisch.
+- Seitenaufbau: Vorhang beim Laden, 3D-Uhr in Three.js (echte Uhrzeit, dreht
+  sich beim Scrollen um), Fotoband, horizontal scrollende Auswahl, gefilterte
+  Kollektion, drehbare 3D-Vitrine aus allen Fotos (CSS 3D), Konditionen,
+  Anfrageformular (Demo, ohne Backend).
