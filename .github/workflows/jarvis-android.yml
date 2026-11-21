@@ -38,6 +38,19 @@ jobs:
           echo "Modell-Dateien:"; find $A/model-en -type f | head -30
           echo "Wort 'jarvis' im Vokabular?"; grep -railw "jarvis" $A/model-en || echo "NICHT gefunden"
 
+      - name: Hörtest «Hallo Jarvis»
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y -qq espeak-ng >/dev/null
+          pip install -q vosk
+          for v in de en de+m3 en-us+f2; do
+            espeak-ng -v $v -s 140 -w raw_$v.wav "Hallo Jarvis"
+            ffmpeg -loglevel error -y -i raw_$v.wav -ar 16000 -ac 1 t_$v.wav
+          done
+          espeak-ng -v de -w raw_neg.wav "Hallo Marcel, wie geht es dir heute"
+          ffmpeg -loglevel error -y -i raw_neg.wav -ar 16000 -ac 1 t_neg.wav
+          python3 jarvis-android/tools/wake_test.py jarvis-android/app/src/main/assets/model-en t_*.wav 2>&1 | grep -viE "^LOG \(VoskAPI:(ReadDataFiles|RemoveOrphan|CompileLooped|ComputeDerived)" | tail -40
+
       - name: APK bauen
         working-directory: jarvis-android
         run: |
