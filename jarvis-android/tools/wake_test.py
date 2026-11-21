@@ -1,6 +1,6 @@
 """Prüft, ob das Vosk-Modell «Hallo Jarvis» erkennt (synthetische Sprache)."""
 import json, sys, wave
-from vosk import Model, Recognizer, SetLogLevel
+from vosk import Model, KaldiRecognizer as Recognizer, SetLogLevel
 
 SetLogLevel(0)
 model = Model(sys.argv[1])
