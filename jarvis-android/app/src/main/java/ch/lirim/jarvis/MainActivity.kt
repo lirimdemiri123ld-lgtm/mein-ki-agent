@@ -143,11 +143,14 @@ class MainActivity : Activity() {
         row.addView(newChat, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val access = styled(Button(this).apply { text = "Bedienungshilfe" }, false)
+        val access = styled(Button(this).apply { text = "Zugriff" }, false)
         access.setOnClickListener { openAccessibilitySettings() }
         val settings = styled(Button(this).apply { text = "Einstellungen" }, false)
         settings.setOnClickListener { showSettings() }
         row2.addView(access, LinearLayout.LayoutParams(w))
+        val voiceBtn = styled(Button(this).apply { text = "Stimme" }, false)
+        voiceBtn.setOnClickListener { VoiceDialog.show(this) }
+        row2.addView(voiceBtn, LinearLayout.LayoutParams(w))
         row2.addView(settings, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
         logView = TextView(this).apply {

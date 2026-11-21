@@ -44,11 +44,9 @@ jobs:
           sudo apt-get install -y -qq espeak-ng >/dev/null
           pip install -q vosk
           for v in de en de+m3 en-us+f2; do
-            espeak-ng -v $v -s 140 -w raw_$v.wav "Hallo Jarvis"
-            ffmpeg -loglevel error -y -i raw_$v.wav -ar 16000 -ac 1 t_$v.wav
+            espeak-ng -v $v -s 140 -w t_$v.wav "Hallo Jarvis"
           done
-          espeak-ng -v de -w raw_neg.wav "Hallo Marcel, wie geht es dir heute"
-          ffmpeg -loglevel error -y -i raw_neg.wav -ar 16000 -ac 1 t_neg.wav
+          espeak-ng -v de -w t_neg.wav "Hallo Marcel, wie geht es dir heute"
           python3 jarvis-android/tools/wake_test.py jarvis-android/app/src/main/assets/model-en t_*.wav 2>&1 | grep -viE "^LOG \(VoskAPI:(ReadDataFiles|RemoveOrphan|CompileLooped|ComputeDerived)" | tail -40
 
       - name: APK bauen
