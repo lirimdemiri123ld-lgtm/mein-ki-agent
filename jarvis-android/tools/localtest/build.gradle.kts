@@ -1,0 +1,13 @@
+plugins {
+    kotlin("jvm") version "2.2.21"
+    application
+}
+dependencies {
+    implementation("com.google.ai.edge.litertlm:litertlm-jvm:0.18.1")
+    implementation("org.jetbrains.kotlin:kotlin-reflect:2.4.0")
+}
+kotlin {
+    jvmToolchain(17)
+    compilerOptions { freeCompilerArgs.addAll(listOf("-Xskip-metadata-version-check")) }
+}
+application { mainClass.set("MainKt") }
