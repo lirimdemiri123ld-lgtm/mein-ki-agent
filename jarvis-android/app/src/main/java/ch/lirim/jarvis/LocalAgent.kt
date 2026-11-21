@@ -1,6 +1,7 @@
 package ch.lirim.jarvis
 
 import android.content.Context
+import ch.lirim.jarvis.core.ToolTextParser
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -40,23 +41,29 @@ object LocalAgent {
         return """
 Du bist Jarvis, Lirims persönlicher KI-Assistent auf seinem Samsung Galaxy S25. Du läufst lokal auf dem Handy.
 Antworte immer auf Deutsch (Schweiz, «ss» statt «ß»), kurz, natürlich, souverän, mit feinem Humor. Kein Markdown.
-Du bedienst das Handy mit Werkzeugen: app_oeffnen, bildschirm_lesen, tippen (id aus der Bildschirmliste), text_eingeben, scrollen, taste, warten.
-Regeln: Rufe pro Antwort genau EIN Werkzeug auf. Vor Senden/Kaufen/Löschen/Anrufen immer zuerst bestaetigen. Nie Passwörter oder PINs.
-Wenn der Auftrag erledigt ist oder es nur eine Frage/Unterhaltung ist: rufe fertig mit einer kurzen Antwort auf.
-Merke dir Dauerhaftes über Lirim mit merken.
+Du bedienst das Handy mit Werkzeugen: app_oeffnen, bildschirm_lesen, tippen (id aus der Bildschirmliste), text_eingeben, scrollen, taste, warten, wecker_stellen, nachrichten_lesen, live_daten.
+Regeln:
+- Ist keine Aktion nötig (Frage, Plaudern, Erklärung): antworte direkt mit normalem Text, ohne Werkzeug.
+- Sonst rufe genau EIN Werkzeug auf. Apps öffnen, lesen, scrollen und Wecker stellen geht ohne Rückfrage.
+- Nur vor Senden, Kaufen, Bezahlen, Löschen oder Anrufen zuerst bestaetigen.
+- Wenn die Aufgabe erledigt ist: fertig mit einer kurzen Zusammenfassung.
+- Nie Passwörter oder PINs. Merke dir Dauerhaftes über Lirim mit merken.
 Jetzt: $now.
-""".trimIndent() + Memory.promptBlock(c).take(1500)
+""".trimIndent()
     }
 
     fun run(c: Context, command: String, hybrid: Boolean, shouldStop: () -> Boolean, say: (String) -> Unit): Result {
         val specs = toolSpecs(c, hybrid)
         val sys = system(c)
+        val memory = Memory.promptBlock(c).take(1500).trim()
+        val known = specs.mapNotNull { Regex("\"name\":\"([a-z_]+)\"").find(it)?.groupValues?.get(1) }.toSet()
         val steps = mutableListOf<String>()
         var screen = ""
         for (step in 1..MAX_STEPS) {
             if (shouldStop()) return Result.STOPPED
             JarvisService.instance?.overlay?.setStatus("denke lokal nach … (Schritt $step)")
             val prompt = buildString {
+                if (memory.isNotEmpty()) append(memory).append("\n\n")
                 if (recentChat.isNotEmpty()) append("Letzter Gesprächsverlauf:\n").append(recentChat.joinToString("\n")).append("\n\n")
                 append("Auftrag von Lirim: ").append(command).append('\n')
                 if (steps.isNotEmpty()) append("\nBisher erledigt:\n").append(steps.joinToString("\n")).append('\n')
@@ -70,14 +77,19 @@ Jetzt: $now.
                 Agent.log("⚠️ Lokales Gehirn: $lastError")
                 return Result.FAILED
             }
-            val name = r.toolName
+            var name = r.toolName
+            var args = r.args
             if (name == null) {
-                val answer = r.text.ifBlank { "Erledigt." }
+                val parsed = ToolTextParser.parse(r.text, known)
+                if (parsed != null) { name = parsed.name; args = parsed.args }
+            }
+            if (name == null) {
+                val answer = ToolTextParser.cleanup(r.text).ifBlank { "Erledigt." }
                 remember(command, answer)
                 say(answer)
                 return Result.DONE
             }
-            val input = JSONObject(r.args.filterValues { it != null })
+            val input = JSONObject(args.filterValues { it != null })
             Agent.log("→ [lokal] $name $input")
             when (name) {
                 "fertig" -> {

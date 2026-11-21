@@ -12,3 +12,4 @@ kotlin {
     compilerOptions { freeCompilerArgs.addAll(listOf("-Xskip-metadata-version-check")) }
 }
 application { mainClass.set("MainKt") }
+sourceSets { main { kotlin.srcDir("../../app/src/main/java/ch/lirim/jarvis/core") } }
