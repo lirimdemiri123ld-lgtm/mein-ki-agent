@@ -21,6 +21,7 @@ object Agent {
     private var messages = JSONArray()
     private var pendingResults: JSONArray? = null
     private var lastActivity = 0L
+    private var currentCommand = ""
 
     var listener: ((String) -> Unit)? = null
     private val logBuf = StringBuilder()
@@ -65,6 +66,7 @@ object Agent {
         messages.put(JSONObject().put("role", "user").put("content", content))
 
         log("Du: $command")
+        currentCommand = command
         running = true
         stopRequested = false
         Thread {
@@ -113,12 +115,12 @@ object Agent {
             prune()
 
             val resp = try {
-                ClaudeClient.send(key, Prefs.model(ctx), systemPrompt(), Tools.definitions(webSearch), messages)
+                ClaudeClient.send(key, Prefs.model(ctx), systemPrompt(ctx), Tools.definitions(webSearch), messages)
             } catch (e: ApiException) {
                 if (webSearch && e.message?.contains("web_search", ignoreCase = true) == true) {
                     log("Websuche nicht verfügbar – ohne weiter.")
                     webSearch = false
-                    ClaudeClient.send(key, Prefs.model(ctx), systemPrompt(), Tools.definitions(false), messages)
+                    ClaudeClient.send(key, Prefs.model(ctx), systemPrompt(ctx), Tools.definitions(false), messages)
                 } else throw e
             }
 
@@ -167,12 +169,15 @@ object Agent {
             val end = endMessage
             if (end != null) {
                 pendingResults = results
+                Memory.addHistory(ctx, currentCommand, end)
                 say(end)
                 return
             }
             if (results.length() == 0) {
                 // Nur Text, kein Werkzeug → fertig
-                say(texts.toString().trim())
+                val answer = texts.toString().trim()
+                Memory.addHistory(ctx, currentCommand, answer)
+                say(answer)
                 return
             }
             if (texts.isNotEmpty()) log("Jarvis denkt: ${texts.toString().trim().take(200)}")
@@ -253,7 +258,7 @@ object Agent {
         else -> "$name …"
     }
 
-    private fun systemPrompt(): String {
+    private fun systemPrompt(ctx: Context): String {
         val now = SimpleDateFormat("EEEE, d. MMMM yyyy, HH:mm", Locale.GERMAN).format(Date())
         return """
 Du bist Jarvis, der persönliche Sprachassistent von Lirim auf seinem Samsung Galaxy S25 (Android). Du bedienst das Handy wie ein Mensch: Apps öffnen, Bildschirm lesen, tippen, Text eingeben, scrollen, wischen.
@@ -271,7 +276,14 @@ Regeln:
 - Bedien nicht die Jarvis-App selbst (ch.lirim.jarvis).
 - Beende jeden Auftrag mit fertig und einer Zusammenfassung in 1–2 Sätzen.
 
+Lernen und Gedächtnis:
+- Du hast ein Langzeitgedächtnis (unten). Nutze es: Spitznamen, Personen, Vorlieben und Routinen von Lirim gelten, ohne dass er sie wiederholen muss.
+- Erzählt Lirim etwas Dauerhaftes über sich (wer «Baba» ist, wie er etwas haben will, eine Routine wie «Feierabend = …»), speichere es mit merken. Sagt er «vergiss …», nutze vergessen.
+- Hast du in einer App einen Weg herausgefunden, gab es einen Umweg oder einen Fehler, speichere VOR fertig einen kurzen, konkreten Tipp mit erfahrung_speichern. So wirst du beim nächsten Mal schneller.
+- Speichere nie Passwörter, PINs, Codes, Karten- oder Kontonummern.
+- Stimmt etwas im Gedächtnis nicht mehr, korrigiere es (vergessen, dann merken).
+
 Jetzt ist: $now.
-""".trimIndent()
+""".trimIndent() + Memory.promptBlock(ctx)
     }
 }

@@ -170,6 +170,9 @@ class MainActivity : Activity() {
         root.addView(input, lp(10))
         root.addView(row, lp(6))
         root.addView(row2, lp(6))
+        val memBtn = styled(Button(this).apply { text = "🧠  Gedächtnis" }, false)
+        memBtn.setOnClickListener { MemoryDialog.show(this) }
+        root.addView(memBtn, lp(6))
         root.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(12) })
         setContentView(root)
     }

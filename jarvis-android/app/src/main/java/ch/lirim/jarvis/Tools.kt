@@ -78,6 +78,19 @@ object Tools {
             JSONObject().put("frage", prop("string", "Die Frage")), listOf("frage")))
         a.put(tool("fertig", "Beendet den Auftrag mit einer kurzen gesprochenen Antwort/Zusammenfassung.",
             JSONObject().put("nachricht", prop("string", "1–2 Sätze")), listOf("nachricht")))
+        a.put(tool("merken", "Speichert dauerhaft etwas über Lirim (Person/Spitzname eines Kontakts, Vorliebe, Routine, Adresse, wiederkehrende Info). Kurz und eindeutig formulieren.",
+            JSONObject()
+                .put("text", prop("string", "z. B. 'Baba = Kontakt «Baba Swisscom» (Vater)'"))
+                .put("kategorie", JSONObject().put("type", "string")
+                    .put("enum", JSONArray(listOf("person", "vorliebe", "routine", "fakt")))),
+            listOf("text", "kategorie")))
+        a.put(tool("vergessen", "Löscht gespeicherte Einträge, die diesen Text enthalten.",
+            JSONObject().put("text", prop("string", "Suchtext")), listOf("text")))
+        a.put(tool("erfahrung_speichern", "Speichert einen kurzen Tipp, wie man in einer App etwas erledigt oder welchen Fehler man vermeiden soll. Wird beim nächsten Öffnen der App automatisch angezeigt.",
+            JSONObject()
+                .put("app", prop("string", "App-Name, z. B. 'WhatsApp'"))
+                .put("tipp", prop("string", "z. B. 'Neuer Chat: Stift-Symbol unten rechts, dann Name ins Suchfeld'")),
+            listOf("app", "tipp")))
         if (webSearch) {
             a.put(JSONObject().put("type", "web_search_20250305").put("name", "web_search").put("max_uses", 3))
         }
@@ -97,7 +110,16 @@ object Tools {
         val c: Context = svc ?: ctx
         return try {
             when (name) {
-                "app_oeffnen" -> after(svc, Apps.open(c, input.getString("name")), 2000)
+                "app_oeffnen" -> {
+                    val appName = input.getString("name")
+                    val res = after(svc, Apps.open(c, appName), 2000)
+                    val tips = Memory.lessonsFor(c, appName)
+                    if (tips.isEmpty()) res
+                    else ToolOutput(res.text + "\n\nDeine gespeicherten Erfahrungen zu dieser App:\n" + tips)
+                }
+                "merken" -> ToolOutput(Memory.remember(c, input.getString("text"), input.optString("kategorie", "fakt")))
+                "vergessen" -> ToolOutput(Memory.forget(c, input.getString("text")))
+                "erfahrung_speichern" -> ToolOutput(Memory.learn(c, input.getString("app"), input.getString("tipp")))
                 "apps_auflisten" -> ToolOutput(Apps.list(c))
                 "bildschirm_lesen" -> ToolOutput(svc!!.readScreen())
                 "screenshot" -> {
