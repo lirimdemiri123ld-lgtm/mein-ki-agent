@@ -19,21 +19,24 @@ Merke dir Dauerhaftes über Lirim mit merken.
 Jetzt: Sonntag, 22. November 2026, 00:10.
 """.trimIndent() + memory
     Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
-    for (maxTok in listOf(4096, 8192)) {
-        println("=== maxNumTokens=$maxTok")
-        Engine(EngineConfig(modelPath = args[0], backend = Backend.CPU(), maxNumTokens = maxTok, cacheDir = "/tmp")).use { e ->
-            e.initialize()
-            for (p in listOf("Was kannst du für mich tun?", "Öffne WhatsApp", "Was gibt es Neues in meinen Nachrichten?")) {
+    val base = system.substringBefore("\n\n## Dein")
+    val variants = listOf(
+        "A_ohne_Gedaechtnis" to Pair(base, ""),
+        "B_mit_Gedaechtnis_im_System" to Pair(system, ""),
+        "C_Gedaechtnis_im_Prompt" to Pair(base, memory + "\n\n"),
+    )
+    Engine(EngineConfig(modelPath = args[0], backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = "/tmp")).use { e ->
+        e.initialize()
+        for ((vn, v) in variants) {
+            println("=== $vn")
+            for (p in listOf("Was kannst du für mich tun?", "Öffne WhatsApp", "Stell einen Wecker um 7 Uhr")) {
                 try {
-                    e.createConversation(ConversationConfig(systemInstruction = Contents.of(system), tools = tools,
+                    e.createConversation(ConversationConfig(systemInstruction = Contents.of(v.first), tools = tools,
                         automaticToolCalling = false, samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.3))).use { c ->
-                        val t = System.currentTimeMillis()
-                        val m = c.sendMessage("Auftrag von Lirim: $p\n\nWas ist der nächste Schritt?")
-                        println("OK [$p] -> ${m.toolCalls} ${m.toString().take(150)} (${(System.currentTimeMillis() - t) / 1000}s)")
+                        val m = c.sendMessage(v.second + "Auftrag von Lirim: $p\n\nWas ist der nächste Schritt?")
+                        println("[$p] CALLS=${m.toolCalls} TEXT=${m.toString().replace("\n", " ").take(220)}")
                     }
-                } catch (ex: Throwable) {
-                    println("FEHLER [$p] -> ${ex.javaClass.simpleName}: ${ex.message?.take(300)}")
-                }
+                } catch (ex: Throwable) { println("FEHLER [$p] ${ex.message?.take(200)}") }
             }
         }
     }
