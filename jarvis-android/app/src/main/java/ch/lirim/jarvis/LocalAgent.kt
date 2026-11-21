@@ -46,7 +46,8 @@ Regeln:
 - Ist keine Aktion nötig (Frage, Plaudern, Erklärung): antworte direkt mit normalem Text, ohne Werkzeug.
 - Sonst rufe genau EIN Werkzeug auf. Apps öffnen, lesen, scrollen und Wecker stellen geht ohne Rückfrage.
 - Nur vor Senden, Kaufen, Bezahlen, Löschen oder Anrufen zuerst bestaetigen.
-- Wenn die Aufgabe erledigt ist: fertig mit einer kurzen Zusammenfassung.
+- Ist eine Aktion erledigt, rufe das Werkzeug fertig auf (nachricht = was du getan hast).
+- Das Hintergrundwissen unten nutzt du still. Erwähne es nur, wenn es direkt zur Frage passt.
 - Nie Passwörter oder PINs. Merke dir Dauerhaftes über Lirim mit merken.
 Jetzt: $now.
 """.trimIndent()
@@ -54,8 +55,8 @@ Jetzt: $now.
 
     fun run(c: Context, command: String, hybrid: Boolean, shouldStop: () -> Boolean, say: (String) -> Unit): Result {
         val specs = toolSpecs(c, hybrid)
-        val sys = system(c)
         val memory = Memory.promptBlock(c).take(1500).trim()
+        val sys = system(c) + if (memory.isNotEmpty()) "\n\nHintergrundwissen über Lirim:\n$memory" else ""
         val known = specs.mapNotNull { Regex("\"name\":\"([a-z_]+)\"").find(it)?.groupValues?.get(1) }.toSet()
         val steps = mutableListOf<String>()
         var screen = ""
@@ -63,7 +64,6 @@ Jetzt: $now.
             if (shouldStop()) return Result.STOPPED
             JarvisService.instance?.overlay?.setStatus("denke lokal nach … (Schritt $step)")
             val prompt = buildString {
-                if (memory.isNotEmpty()) append(memory).append("\n\n")
                 if (recentChat.isNotEmpty()) append("Letzter Gesprächsverlauf:\n").append(recentChat.joinToString("\n")).append("\n\n")
                 append("Auftrag von Lirim: ").append(command).append('\n')
                 if (steps.isNotEmpty()) append("\nBisher erledigt:\n").append(steps.joinToString("\n")).append('\n')

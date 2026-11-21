@@ -9,7 +9,7 @@ fun main(args: Array<String>) {
     val specs = (0 until a.length()).map { a.getJSONObject(it).toString() }
     println("Werkzeuge: ${specs.size}")
     val tools = specs.map { j -> tool(object : OpenApiTool { override fun getToolDescriptionJsonString() = j; override fun execute(p: String) = "{}" }) }
-    val memory = "\n\n## Dein Gedächtnis über Lirim\n" + (1..25).joinToString("\n") { "- Erkenntnis $it: Lirim arbeitet als Projektleiter bei Migros Online und mag effiziente Abläufe." }.take(1500)
+    val memory = "\n\n## Dein Gedächtnis über Lirim\n" + listOf("- Baba = Kontakt «Baba Swisscom» (Vater)", "- Shukrije ist Lirims Frau", "- Arbeitet als Projektleiter bei Migros Online", "- Wohnt in Pratteln", "- Mag kurze, direkte Antworten").joinToString("\n")
     val system = """
 Du bist Jarvis, Lirims persönlicher KI-Assistent auf seinem Samsung Galaxy S25. Du läufst lokal auf dem Handy.
 Antworte immer auf Deutsch (Schweiz, «ss» statt «ß»), kurz, natürlich, souverän, mit feinem Humor. Kein Markdown.
@@ -18,13 +18,14 @@ Regeln:
 - Ist keine Aktion nötig (Frage, Plaudern, Erklärung): antworte direkt mit normalem Text, ohne Werkzeug.
 - Sonst rufe genau EIN Werkzeug auf. Apps öffnen, lesen, scrollen und Wecker stellen geht ohne Rückfrage.
 - Nur vor Senden, Kaufen, Bezahlen, Löschen oder Anrufen zuerst bestaetigen.
-- Wenn die Aufgabe erledigt ist: fertig mit einer kurzen Zusammenfassung.
+- Ist eine Aktion erledigt, rufe das Werkzeug fertig auf (nachricht = was du getan hast).
+- Das Hintergrundwissen unten nutzt du still. Erwähne es nur, wenn es direkt zur Frage passt.
 - Nie Passwörter oder PINs. Merke dir Dauerhaftes über Lirim mit merken.
 Jetzt: Sonntag, 22. November 2026, 00:10.
 """.trimIndent() + memory
     Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
     val base = system.substringBefore("\n\n## Dein")
-    val variants = listOf("APP_WIE_NEU" to Pair(base, memory.trim() + "\n\n"))
+    val variants = listOf("APP_WIE_NEU" to Pair(base + "\n\nHintergrundwissen über Lirim:\n" + memory.trim(), ""))
     val known = specs.map { Regex("\"name\":\"([a-z_]+)\"").find(it)!!.groupValues[1] }.toSet()
     Engine(EngineConfig(modelPath = args[0], backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = "/tmp")).use { e ->
         e.initialize()
