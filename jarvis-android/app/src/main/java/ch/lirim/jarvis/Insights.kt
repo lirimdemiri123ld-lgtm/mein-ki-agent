@@ -60,6 +60,7 @@ object Insights {
         val key = Prefs.apiKey(c)
         val local = useLocal(c)
         if (running) return false
+        if (local && (Agent.running || LocalBrain.isBusy())) return false
         if (!local && (key.isBlank() || System.currentTimeMillis() < Prefs.cloudBlockedUntil(c))) return false
         running = true
         Prefs.setLastInsightTry(c, System.currentTimeMillis())

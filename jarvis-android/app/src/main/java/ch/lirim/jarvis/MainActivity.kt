@@ -164,7 +164,8 @@ class MainActivity : Activity() {
         main.removeCallbacks(frameTick); main.post(frameTick)
         main.removeCallbacks(secondTick); main.post(secondTick)
         refreshNet(force = false)
-        if (Insights.isStale(this) && Prefs.proactive(this)) {
+        // Mit lokalem Gehirn nicht beim Öffnen analysieren (blockiert sonst deine Befehle)
+        if (Insights.isStale(this) && Prefs.proactive(this) && !LocalBrain.available(this)) {
             Thread { Insights.run(applicationContext, notify = false) }.start()
         }
         panels.forEachIndexed { i, p -> if (p.alpha < 1f) p.reveal(150L + i * 120L) }
@@ -379,7 +380,11 @@ class MainActivity : Activity() {
             reactor.subLabel = when (reactor.state) {
                 ArcReactorView.State.LISTENING -> "Ich höre"
                 ArcReactorView.State.SPEAKING -> "Spreche"
-                ArcReactorView.State.THINKING -> if (Insights.running) "Analysiere" else "Verarbeite"
+                ArcReactorView.State.THINKING -> when {
+                    LocalBrain.loading -> "Lade Gehirn"
+                    Insights.running -> "Analysiere"
+                    else -> "Verarbeite"
+                }
                 ArcReactorView.State.IDLE -> "Online"
             }
             if (visible) main.postDelayed(this, 50)

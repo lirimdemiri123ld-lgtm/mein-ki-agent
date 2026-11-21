@@ -12,7 +12,12 @@ import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.tool
+import com.google.ai.edge.litertlm.Conversation
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /**
  * Lokales KI-Gehirn: Sprachmodelle laufen direkt auf dem Handy (LiteRT-LM),
@@ -44,6 +49,43 @@ object LocalBrain {
     @Volatile var backendName = ""
         private set
     private val lock = Any()
+    /** Nur eine Anfrage gleichzeitig an das lokale Modell. */
+    private val busy = Semaphore(1)
+    private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "jarvis-brain").apply { isDaemon = true } }
+    @Volatile private var current: Conversation? = null
+    @Volatile var loading = false
+        private set
+
+    fun isBusy() = busy.availablePermits() == 0
+
+    /** Bricht die laufende Antwort ab (Stopp-Knopf). */
+    fun cancel() {
+        try { current?.cancelProcess() } catch (_: Throwable) {}
+    }
+
+    /**
+     * Führt eine Anfrage exklusiv und mit Zeitlimit aus.
+     * @param wait wie lange auf ein besetztes Gehirn gewartet wird
+     */
+    private fun <T> exclusive(c: Context, wait: Long, timeoutMs: Long, body: (Engine) -> T): T {
+        if (!busy.tryAcquire(wait, TimeUnit.MILLISECONDS)) throw IllegalStateException("Mein Gehirn ist gerade beschäftigt.")
+        try {
+            val firstLoad = engine == null || loadedId != active(c)?.id
+            val f = worker.submit<T> { body(ensureEngine(c)) }
+            return try {
+                f.get(if (firstLoad) timeoutMs + 180_000 else timeoutMs, TimeUnit.MILLISECONDS)
+            } catch (e: TimeoutException) {
+                cancel()
+                try { f.get(5, TimeUnit.SECONDS) } catch (_: Throwable) {}
+                throw IllegalStateException("Zeitüberschreitung – das Gehirn hat zu lange gebraucht.")
+            } catch (e: java.util.concurrent.ExecutionException) {
+                throw e.cause ?: e
+            }
+        } finally {
+            current = null
+            busy.release()
+        }
+    }
 
     fun dir(c: Context): File = File(c.getExternalFilesDir(null) ?: c.filesDir, "models").also { it.mkdirs() }
     fun file(c: Context, m: Model) = File(dir(c), m.file)
@@ -114,40 +156,43 @@ object LocalBrain {
             engine?.let { if (loadedId == m.id) return it }
             try { engine?.close() } catch (_: Exception) {}
             engine = null
-            Agent.log("🧠 Lade lokales Gehirn ${m.title} …")
+            Agent.log("🧠 Lade lokales Gehirn ${m.title} … (beim ersten Mal bis zu 2 Minuten)")
+            JarvisService.instance?.overlay?.setStatus("lade mein Gehirn … beim ersten Mal bis zu 2 Minuten")
+            loading = true
             val path = file(c, m).absolutePath
             val e = try {
                 Engine(EngineConfig(modelPath = path, backend = Backend.GPU(), maxNumTokens = 8192, cacheDir = c.cacheDir.path))
                     .also { it.initialize(); backendName = "GPU" }
             } catch (t: Throwable) {
+                loading = true
                 Agent.log("GPU nicht verfügbar, nutze CPU (${t.message?.take(80)})")
                 Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = c.cacheDir.path))
                     .also { it.initialize(); backendName = "CPU" }
             }
             engine = e
             loadedId = m.id
+            loading = false
             Agent.log("🧠 Lokales Gehirn bereit ($backendName)")
             return e
         }
     }
 
     /** Einfache Textantwort (ohne Werkzeuge). */
-    fun chat(c: Context, system: String, prompt: String): String {
-        val e = ensureEngine(c)
+    fun chat(c: Context, system: String, prompt: String, wait: Long = 0): String = exclusive(c, wait, 120_000) { e ->
         val cfg = ConversationConfig(
             systemInstruction = Contents.of(system),
             samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.7)
         )
         e.createConversation(cfg).use { conv ->
-            return conv.sendMessage(prompt).toString().trim()
+            current = conv
+            conv.sendMessage(prompt).toString().trim()
         }
     }
 
     data class Step(val text: String, val toolName: String?, val args: Map<String, Any?>)
 
     /** Ein Agenten-Schritt: das Modell wählt höchstens ein Werkzeug. */
-    fun step(c: Context, system: String, prompt: String, toolsJson: List<String>): Step {
-        val e = ensureEngine(c)
+    fun step(c: Context, system: String, prompt: String, toolsJson: List<String>): Step = exclusive(c, 20_000, 60_000) { e ->
         val providers = toolsJson.map { j ->
             tool(object : OpenApiTool {
                 override fun getToolDescriptionJsonString() = j
@@ -161,9 +206,10 @@ object LocalBrain {
             samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.3)
         )
         e.createConversation(cfg).use { conv ->
+            current = conv
             val msg: Message = conv.sendMessage(prompt)
             val call = msg.toolCalls.firstOrNull()
-            return Step(msg.toString().trim(), call?.name, call?.arguments ?: emptyMap())
+            Step(msg.toString().trim(), call?.name, call?.arguments ?: emptyMap())
         }
     }
 }

@@ -47,6 +47,7 @@ object Agent {
 
     fun stop() {
         stopRequested = true
+        LocalBrain.cancel()
         Speaker.stop()
     }
 
