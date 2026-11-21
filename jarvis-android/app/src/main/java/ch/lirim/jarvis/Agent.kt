@@ -203,6 +203,23 @@ object Agent {
 
     /** Alte Bildschirm-Inhalte kürzen, damit es schnell und günstig bleibt. */
     private fun prune() {
+        // Denk-Blöcke entfernen: sie sind an den exakten Verlauf gebunden,
+        // der durch das Kürzen unten verändert wird (sonst API-Fehler 400).
+        for (i in 0 until messages.length()) {
+            val m = messages.getJSONObject(i)
+            if (m.optString("role") != "assistant") continue
+            val c = m.opt("content") as? JSONArray ?: continue
+            val cleaned = JSONArray()
+            for (j in 0 until c.length()) {
+                val b = c.optJSONObject(j)
+                val t = b?.optString("type")
+                if (t == "thinking" || t == "redacted_thinking") continue
+                cleaned.put(c.get(j))
+            }
+            if (cleaned.length() == 0) cleaned.put(JSONObject().put("type", "text").put("text", "…"))
+            m.put("content", cleaned)
+        }
+
         val keepFrom = messages.length() - 2
         for (i in 0 until keepFrom) {
             val m = messages.getJSONObject(i)
