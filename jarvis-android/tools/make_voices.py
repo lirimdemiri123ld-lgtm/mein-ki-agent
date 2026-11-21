@@ -16,8 +16,8 @@ for a in assets:
     if not m:
         continue
     lang, name, q = m.groups()
-    if q == "x_low":
-        continue
+    if q == "x_low" or "glados" in name.lower():
+        continue  # keine Nachahmungen bekannter Figuren
     pretty = name.replace("_", " ").title()
     hint = hints.get(name, "")
     title = f"{pretty} ({q})" + (f" – {hint}" if hint else "")
