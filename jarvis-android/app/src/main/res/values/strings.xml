@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Jarvis</string>
+    <string name="acc_description">Jarvis liest den Bildschirm und bedient Apps für dich, wenn du ihm per Sprache einen Auftrag gibst. Heikle Aktionen (senden, kaufen, löschen) bestätigst du immer selbst.</string>
+</resources>

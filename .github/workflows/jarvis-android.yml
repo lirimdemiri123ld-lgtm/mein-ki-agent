@@ -1,0 +1,54 @@
+name: Jarvis Android bauen
+
+on:
+  push:
+    branches: [jarvis-android]
+    paths:
+      - 'jarvis-android/**'
+      - '.github/workflows/jarvis-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: APK bauen
+        working-directory: jarvis-android
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon 2>&1 | tee build.log
+
+      - name: Fehler anzeigen
+        if: failure()
+        run: |
+          grep -E "^e: |error:|What went wrong|Could not|> " jarvis-android/build.log | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+
+      - name: Als Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp jarvis-android/app/build/outputs/apk/release/app-release.apk Jarvis.apk
+          gh release delete jarvis-latest -y --cleanup-tag || true
+          gh release create jarvis-latest Jarvis.apk \
+            --target "${{ github.sha }}" \
+            --prerelease \
+            --title "Jarvis – neueste Version" \
+            --notes "Build ${{ github.run_number }}. Auf dem Handy öffnen, Jarvis.apk herunterladen und installieren."
