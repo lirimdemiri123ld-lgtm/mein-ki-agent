@@ -68,7 +68,7 @@ Jetzt: $now.
                 append("Auftrag von Lirim: ").append(command).append('\n')
                 if (steps.isNotEmpty()) append("\nBisher erledigt:\n").append(steps.joinToString("\n")).append('\n')
                 if (screen.isNotEmpty()) append("\nAktueller Bildschirm:\n").append(screen.take(2500)).append('\n')
-                append("\nWas ist der nächste Schritt?")
+                append(if (steps.isEmpty()) "\n(Antworte direkt oder wähle ein Werkzeug.)" else "\nWas ist der nächste Schritt?")
             }
             val r = try {
                 LocalBrain.step(c, sys, prompt, specs)
