@@ -17,18 +17,14 @@ object LocalAgent {
     private const val MAX_STEPS = 15
     private val recentChat = ArrayDeque<String>()
 
-    private val excluded = setOf("screenshot", "tippen_xy", "wischen", "lange_druecken")
+    @Volatile var lastError = ""
+        private set
 
-    private fun toolSpecs(hybrid: Boolean): List<String> {
-        val defs = Tools.definitions(false)
+    /** Kompakte Werkzeugliste für das kleine Modell (assets/local_tools.json). */
+    private fun toolSpecs(c: Context, hybrid: Boolean): List<String> {
+        val arr = org.json.JSONArray(c.assets.open("local_tools.json").bufferedReader().use { it.readText() })
         val out = mutableListOf<String>()
-        for (i in 0 until defs.length()) {
-            val d = defs.getJSONObject(i)
-            val name = d.optString("name")
-            if (name.isEmpty() || name in excluded) continue
-            out.add(JSONObject().put("name", name).put("description", d.optString("description"))
-                .put("parameters", d.getJSONObject("input_schema")).toString())
-        }
+        for (i in 0 until arr.length()) out.add(arr.getJSONObject(i).toString())
         if (hybrid) {
             out.add(JSONObject().put("name", "claude_fragen")
                 .put("description", "Nur wenn die Aufgabe für dich zu schwierig ist (viele Schritte in komplexen Apps, Bildanalyse, aktuelle Infos aus dem Web). Übergibt an die stärkere Cloud-KI.")
@@ -49,11 +45,11 @@ Regeln: Rufe pro Antwort genau EIN Werkzeug auf. Vor Senden/Kaufen/Löschen/Anru
 Wenn der Auftrag erledigt ist oder es nur eine Frage/Unterhaltung ist: rufe fertig mit einer kurzen Antwort auf.
 Merke dir Dauerhaftes über Lirim mit merken.
 Jetzt: $now.
-""".trimIndent() + Memory.promptBlock(c).take(2500)
+""".trimIndent() + Memory.promptBlock(c).take(1500)
     }
 
     fun run(c: Context, command: String, hybrid: Boolean, shouldStop: () -> Boolean, say: (String) -> Unit): Result {
-        val specs = toolSpecs(hybrid)
+        val specs = toolSpecs(c, hybrid)
         val sys = system(c)
         val steps = mutableListOf<String>()
         var screen = ""
@@ -64,13 +60,14 @@ Jetzt: $now.
                 if (recentChat.isNotEmpty()) append("Letzter Gesprächsverlauf:\n").append(recentChat.joinToString("\n")).append("\n\n")
                 append("Auftrag von Lirim: ").append(command).append('\n')
                 if (steps.isNotEmpty()) append("\nBisher erledigt:\n").append(steps.joinToString("\n")).append('\n')
-                if (screen.isNotEmpty()) append("\nAktueller Bildschirm:\n").append(screen.take(3500)).append('\n')
+                if (screen.isNotEmpty()) append("\nAktueller Bildschirm:\n").append(screen.take(2500)).append('\n')
                 append("\nWas ist der nächste Schritt?")
             }
             val r = try {
                 LocalBrain.step(c, sys, prompt, specs)
             } catch (e: Throwable) {
-                Agent.log("⚠️ Lokales Gehirn: ${e.message?.take(160)}")
+                lastError = (e.message ?: e.javaClass.simpleName).take(200)
+                Agent.log("⚠️ Lokales Gehirn: $lastError")
                 return Result.FAILED
             }
             val name = r.toolName

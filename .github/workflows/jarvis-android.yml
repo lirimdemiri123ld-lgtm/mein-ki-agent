@@ -84,7 +84,7 @@ jobs:
         run: |
           curl -sSL -o /tmp/m.litertlm "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/6e5c4f1e395deb959c494953478fa5cec4b8008f/gemma-4-E2B-it.litertlm?download=true"
           ls -la /tmp/m.litertlm
-          gradle run --no-daemon -q --args="/tmp/m.litertlm" 2>&1 | tail -40
+          gradle run --no-daemon -q --args="/tmp/m.litertlm $GITHUB_WORKSPACE/jarvis-android/app/src/main/assets/local_tools.json" 2>&1 | tail -40
 
       - name: APK bauen
         working-directory: jarvis-android

@@ -94,6 +94,7 @@ object Agent {
         val forceCloud = lc.startsWith("claude") || lc.contains("mit claude")
         val hasKey = Prefs.apiKey(ctx).isNotBlank()
 
+        val cloudOk = hasKey && System.currentTimeMillis() >= Prefs.cloudBlockedUntil(ctx)
         if ((mode == "cloud" || forceCloud) && hasKey) { cloud(ctx); return }
 
         if (LocalBrain.available(ctx)) {
@@ -105,7 +106,12 @@ object Agent {
             when (r) {
                 LocalAgent.Result.ESCALATE, LocalAgent.Result.FAILED -> {
                     if (!hybrid) {
-                        if (r == LocalAgent.Result.FAILED) say("Das konnte ich lokal leider nicht lösen.")
+                        if (r == LocalAgent.Result.FAILED) say("Mein lokales Gehirn hatte ein Problem: ${LocalAgent.lastError.take(120)}")
+                        return
+                    }
+                    if (System.currentTimeMillis() < Prefs.cloudBlockedUntil(ctx)) {
+                        if (r == LocalAgent.Result.FAILED) say("Mein lokales Gehirn hatte ein Problem: ${LocalAgent.lastError.take(120)}")
+                        else say("Das schaffe ich lokal nicht, und dein Claude-Guthaben ist leer.")
                         return
                     }
                     if (askCloud()) {
@@ -119,7 +125,9 @@ object Agent {
             }
             return
         }
-        if (hasKey && mode != "local") { cloud(ctx); return }
+        if (cloudOk && mode != "local") { cloud(ctx); return }
+        val dl = LocalBrain.models.map { LocalBrain.progress(ctx, it) }.firstOrNull { it in 0..99 }
+        if (dl != null) { say("Mein lokales Gehirn lädt noch, $dl Prozent. Gleich bin ich bereit."); return }
         say("Ich habe noch kein lokales Gehirn. Tippe auf GEHIRN und lade ein Modell in deinen Handyspeicher.")
         messages = JSONArray(); pendingResults = null
     }

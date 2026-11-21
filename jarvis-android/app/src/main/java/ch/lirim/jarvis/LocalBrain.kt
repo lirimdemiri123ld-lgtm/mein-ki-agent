@@ -117,11 +117,11 @@ object LocalBrain {
             Agent.log("🧠 Lade lokales Gehirn ${m.title} …")
             val path = file(c, m).absolutePath
             val e = try {
-                Engine(EngineConfig(modelPath = path, backend = Backend.GPU(), maxNumTokens = 4096, cacheDir = c.cacheDir.path))
+                Engine(EngineConfig(modelPath = path, backend = Backend.GPU(), maxNumTokens = 8192, cacheDir = c.cacheDir.path))
                     .also { it.initialize(); backendName = "GPU" }
             } catch (t: Throwable) {
                 Agent.log("GPU nicht verfügbar, nutze CPU (${t.message?.take(80)})")
-                Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), maxNumTokens = 4096, cacheDir = c.cacheDir.path))
+                Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = c.cacheDir.path))
                     .also { it.initialize(); backendName = "CPU" }
             }
             engine = e
