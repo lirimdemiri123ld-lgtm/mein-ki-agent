@@ -22,6 +22,9 @@ object Prefs {
     fun bubble(c: Context): Boolean = p(c).getBoolean("bubble", true)
     fun setBubble(c: Context, v: Boolean) = p(c).edit().putBoolean("bubble", v).apply()
 
+    fun wakeWord(c: Context): Boolean = p(c).getBoolean("wake_word", false)
+    fun setWakeWord(c: Context, v: Boolean) = p(c).edit().putBoolean("wake_word", v).apply()
+
     fun webSearch(c: Context): Boolean = p(c).getBoolean("web_search", true)
     fun setWebSearch(c: Context, v: Boolean) = p(c).edit().putBoolean("web_search", v).apply()
 }

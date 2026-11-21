@@ -1,9 +1,11 @@
 package ch.lirim.jarvis
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -28,6 +30,7 @@ class MainActivity : Activity() {
     companion object {
         const val EXTRA_LISTEN = "listen"
         private const val REQ_SPEECH = 42
+        private const val REQ_PERMS = 43
         private const val ORANGE = 0xFFFF6600.toInt()
         private const val PEACH = 0xFFFAE2D3.toInt()
     }
@@ -36,6 +39,7 @@ class MainActivity : Activity() {
     private lateinit var logView: TextView
     private lateinit var scroll: ScrollView
     private lateinit var input: EditText
+    private var askedPerms = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,6 +65,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (Prefs.wakeWord(this) && !WakeWordService.running && !askedPerms) applyWakeWord()
         updateStatus()
         logView.text = Agent.fullLog()
         Agent.listener = { s ->
@@ -173,7 +178,8 @@ class MainActivity : Activity() {
     private fun updateStatus() {
         val acc = if (JarvisService.instance != null) "✅ Bedienungshilfe aktiv" else "❌ Bedienungshilfe aus – bitte einschalten"
         val key = if (Prefs.apiKey(this).isNotBlank()) "✅ API-Schlüssel gesetzt" else "❌ API-Schlüssel fehlt (Einstellungen)"
-        statusView.text = "$acc\n$key"
+        val wake = if (Prefs.wakeWord(this)) "\n🎙 Hört auf «Hallo Jarvis»" else ""
+        statusView.text = "$acc\n$key$wake"
     }
 
     // ------------------------------------------------------------------ Aktionen
@@ -213,9 +219,10 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQ_SPEECH && resultCode == RESULT_OK) {
-            val text = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-            if (!text.isNullOrBlank()) run(text)
+        if (requestCode == REQ_SPEECH) {
+            val text = if (resultCode == RESULT_OK)
+                data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() else null
+            if (!text.isNullOrBlank()) run(text) else WakeWordService.resume(this)
         }
     }
 
@@ -238,6 +245,31 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Abbrechen", null)
             .show()
+    }
+
+    private fun applyWakeWord() {
+        if (!Prefs.wakeWord(this)) {
+            WakeWordService.stop(this)
+            return
+        }
+        val needed = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+            .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (needed.isNotEmpty()) {
+            askedPerms = true
+            requestPermissions(needed.toTypedArray(), REQ_PERMS)
+            return
+        }
+        if (!WakeWordService.running) WakeWordService.start(this)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_PERMS) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            WakeWordService.start(this)
+        } else {
+            Toast.makeText(this, "Ohne Mikrofon-Berechtigung kann Jarvis nicht auf «Hallo Jarvis» hören.", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showSettings() {
@@ -264,11 +296,15 @@ class MainActivity : Activity() {
             text = "Schwebenden 🎙-Knopf anzeigen"
             isChecked = Prefs.bubble(this@MainActivity)
         }
+        val wake = CheckBox(this).apply {
+            text = "Auf «Hallo Jarvis» hören (immer an)"
+            isChecked = Prefs.wakeWord(this@MainActivity)
+        }
         val web = CheckBox(this).apply {
             text = "Websuche erlauben"
             isChecked = Prefs.webSearch(this@MainActivity)
         }
-        listOf(keyLabel, key, modelLabel, model, auto, bubble, web).forEach { box.addView(it) }
+        listOf(keyLabel, key, modelLabel, model, auto, bubble, wake, web).forEach { box.addView(it) }
 
         AlertDialog.Builder(this)
             .setTitle("Einstellungen")
@@ -279,6 +315,8 @@ class MainActivity : Activity() {
                 Prefs.setAutoListen(this, auto.isChecked)
                 Prefs.setBubble(this, bubble.isChecked)
                 Prefs.setWebSearch(this, web.isChecked)
+                Prefs.setWakeWord(this, wake.isChecked)
+                applyWakeWord()
                 JarvisService.instance?.overlay?.let { if (bubble.isChecked) it.showBubble() else it.hideBubble() }
                 updateStatus()
             }

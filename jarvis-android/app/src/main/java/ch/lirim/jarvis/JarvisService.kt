@@ -39,6 +39,9 @@ class JarvisService : AccessibilityService() {
         instance = this
         Speaker.init(this)
         overlay = Overlay(this).also { if (Prefs.bubble(this)) it.showBubble() }
+        if (Prefs.wakeWord(this) && !WakeWordService.running &&
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) WakeWordService.start(this)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}

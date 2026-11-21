@@ -26,6 +26,18 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      - name: Sprachmodell für «Hallo Jarvis» laden
+        run: |
+          A=jarvis-android/app/src/main/assets
+          mkdir -p $A
+          curl -sSL -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+          unzip -q model.zip
+          rm -rf $A/model-en
+          mv vosk-model-small-en-us-0.15 $A/model-en
+          echo "en-us-0.15" > $A/model-en/uuid
+          echo "Modell-Dateien:"; find $A/model-en -type f | head -30
+          echo "Wort 'jarvis' im Vokabular?"; grep -railw "jarvis" $A/model-en || echo "NICHT gefunden"
+
       - name: APK bauen
         working-directory: jarvis-android
         run: |

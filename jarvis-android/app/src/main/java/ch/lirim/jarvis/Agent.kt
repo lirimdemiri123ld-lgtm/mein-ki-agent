@@ -79,6 +79,7 @@ object Agent {
                 running = false
                 lastActivity = System.currentTimeMillis()
                 JarvisService.instance?.overlay?.hideStatus()
+                WakeWordService.resume(app)
             }
         }.start()
     }
