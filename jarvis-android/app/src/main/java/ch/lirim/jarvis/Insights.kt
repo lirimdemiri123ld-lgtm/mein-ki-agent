@@ -28,6 +28,10 @@ object Insights {
     var listener: (() -> Unit)? = null
 
     fun schedule(c: Context) {
+        try { scheduleInner(c) } catch (e: Exception) { Agent.log("Hintergrund-Analyse nicht planbar: ${e.message}") }
+    }
+
+    private fun scheduleInner(c: Context) {
         val js = c.getSystemService(JobScheduler::class.java)
         if (!Prefs.proactive(c)) { js.cancel(JOB_ID); return }
         if (js.getPendingJob(JOB_ID) != null) return

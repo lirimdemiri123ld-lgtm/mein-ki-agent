@@ -91,6 +91,13 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val crash = JarvisApp.crashFile(this)
+        if (crash.exists()) {
+            val text = try { crash.readText() } catch (e: Exception) { "?" }
+            crash.delete()
+            showCrash(text)
+            return
+        }
         Speaker.init(this)
         buildUi()
         if (savedInstanceState == null) handleIntent(intent)
@@ -104,6 +111,7 @@ class MainActivity : Activity() {
     }
 
     private fun handleIntent(i: Intent?) {
+        if (crashMode) return
         val explicit = i?.getBooleanExtra(EXTRA_LISTEN, false) == true
         val assist = i?.action == Intent.ACTION_ASSIST
         val launcher = i?.action == Intent.ACTION_MAIN && Prefs.autoListen(this)
@@ -112,8 +120,39 @@ class MainActivity : Activity() {
         }
     }
 
+    private var crashMode = false
+
+    /** Einfache Fehleranzeige ohne HUD (falls der letzte Start abgestürzt ist). */
+    private fun showCrash(text: String) {
+        crashMode = true
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(48), dp(16), dp(16))
+            setBackgroundColor(Color.BLACK)
+        }
+        box.addView(TextView(this).apply {
+            this.text = "Jarvis ist beim letzten Start abgestürzt.\nBitte Screenshot an Claude schicken:"
+            setTextColor(Hud.ORANGE); textSize = 16f
+        })
+        val err = TextView(this).apply {
+            this.text = text.take(3500); setTextColor(Color.WHITE); textSize = 11f; typeface = Hud.MONO
+            setTextIsSelectable(true)
+        }
+        box.addView(ScrollView(this).apply { addView(err) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(chip("KOPIEREN") {
+            val cm = getSystemService(android.content.ClipboardManager::class.java)
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("Jarvis-Fehler", text))
+            Toast.makeText(this, "Kopiert", Toast.LENGTH_SHORT).show()
+        })
+        row.addView(chip("NEU STARTEN") { recreate() }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+        box.addView(row)
+        setContentView(box)
+    }
+
     override fun onResume() {
         super.onResume()
+        if (crashMode) return
         visible = true
         if (Prefs.wakeWord(this) && !WakeWordService.running && !askedPerms) applyWakeWord()
         typer.setAll(lastLines(Agent.fullLog(), 14))
@@ -132,6 +171,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        if (crashMode) { super.onPause(); return }
         visible = false
         Agent.listener = null
         NotificationStore.listener = null
