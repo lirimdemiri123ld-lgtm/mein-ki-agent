@@ -44,13 +44,25 @@ object Insights {
         )
     }
 
-    fun isStale(c: Context) = System.currentTimeMillis() - Memory.insightTs > 2 * 60 * 60 * 1000L
+    fun isStale(c: Context): Boolean {
+        val now = System.currentTimeMillis()
+        return now - Memory.insightTs > 2 * 3600_000L && now - Prefs.lastInsightTry(c) > 2 * 3600_000L
+    }
+
+    private fun useLocal(c: Context): Boolean {
+        if (!LocalBrain.available(c)) return false
+        val mode = Prefs.brain(c)
+        return mode != "cloud" || Prefs.apiKey(c).isBlank() || System.currentTimeMillis() < Prefs.cloudBlockedUntil(c)
+    }
 
     /** Blockierend – im Hintergrund aufrufen. */
     fun run(c: Context, notify: Boolean): Boolean {
         val key = Prefs.apiKey(c)
-        if (key.isBlank() || running) return false
+        val local = useLocal(c)
+        if (running) return false
+        if (!local && (key.isBlank() || System.currentTimeMillis() < Prefs.cloudBlockedUntil(c))) return false
         running = true
+        Prefs.setLastInsightTry(c, System.currentTimeMillis())
         try {
             try { Weather.fetch(c) } catch (_: Exception) {}
             try { Stocks.fetch(c) } catch (_: Exception) {}
@@ -77,6 +89,10 @@ Höchstens 4 Tipps, höchstens 2 Erkenntnisse. Nie Passwörter oder Kontodaten.
                 append("Früherer Lagebericht: $oldBrief\n")
                 append(Memory.promptBlock(c))
             }
+            val text: String
+            if (local) {
+                text = LocalBrain.chat(c, system, user.take(6000))
+            } else {
             val tools = JSONArray()
             if (Prefs.webSearch(c)) tools.put(JSONObject().put("type", "web_search_20250305").put("name", "web_search").put("max_uses", 2))
             val msgs = JSONArray().put(JSONObject().put("role", "user").put("content", user))
@@ -86,10 +102,12 @@ Höchstens 4 Tipps, höchstens 2 Erkenntnisse. Nie Passwörter oder Kontodaten.
                 if (tools.length() > 0) ClaudeClient.send(key, Prefs.model(c), system, JSONArray(), msgs) else throw e
             }
             val content = resp.getJSONArray("content")
-            var text = ""
+            var t = ""
             for (i in 0 until content.length()) {
                 val b = content.getJSONObject(i)
-                if (b.optString("type") == "text") text = b.optString("text")
+                if (b.optString("type") == "text") t = b.optString("text")
+            }
+            text = t
             }
             val json = JSONObject(text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1))
             val tips = mutableListOf<Memory.Tip>()
@@ -112,7 +130,10 @@ Höchstens 4 Tipps, höchstens 2 Erkenntnisse. Nie Passwörter oder Kontodaten.
             listener?.invoke()
             return true
         } catch (e: Exception) {
-            Agent.log("Analyse fehlgeschlagen: ${e.message}")
+            if (e.message?.contains("credit", ignoreCase = true) == true) {
+                Prefs.setCloudBlockedUntil(c, System.currentTimeMillis() + 6 * 3600_000L)
+                Agent.log("Analyse: Claude-Guthaben leer – nächster Versuch später oder lokal.")
+            } else Agent.log("Analyse fehlgeschlagen: ${e.message?.take(160)}")
             return false
         } finally {
             running = false

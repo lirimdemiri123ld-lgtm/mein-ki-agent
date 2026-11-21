@@ -47,6 +47,22 @@ object Prefs {
     fun proactive(c: Context): Boolean = p(c).getBoolean("proactive", true)
     fun setProactive(c: Context, v: Boolean) = p(c).edit().putBoolean("proactive", v).apply()
 
+    /** "hybrid" (Standard), "local" oder "cloud". */
+    fun brain(c: Context): String = p(c).getString("brain", "hybrid") ?: "hybrid"
+    fun setBrain(c: Context, v: String) = p(c).edit().putString("brain", v).apply()
+
+    fun localModel(c: Context): String = p(c).getString("local_model", "gemma4-e2b") ?: "gemma4-e2b"
+    fun setLocalModel(c: Context, v: String) = p(c).edit().putString("local_model", v).apply()
+
+    fun download(c: Context, modelId: String): Long = p(c).getLong("dl_$modelId", -1L)
+    fun setDownload(c: Context, modelId: String, id: Long) = p(c).edit().putLong("dl_$modelId", id).apply()
+
+    fun cloudBlockedUntil(c: Context): Long = p(c).getLong("cloud_blocked", 0L)
+    fun setCloudBlockedUntil(c: Context, t: Long) = p(c).edit().putLong("cloud_blocked", t).apply()
+
+    fun lastInsightTry(c: Context): Long = p(c).getLong("insight_try", 0L)
+    fun setLastInsightTry(c: Context, t: Long) = p(c).edit().putLong("insight_try", t).apply()
+
     fun webSearch(c: Context): Boolean = p(c).getBoolean("web_search", true)
     fun setWebSearch(c: Context, v: Boolean) = p(c).edit().putBoolean("web_search", v).apply()
 }

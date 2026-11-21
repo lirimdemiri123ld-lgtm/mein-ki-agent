@@ -41,6 +41,7 @@ object Agent {
         if (running) return
         messages = JSONArray()
         pendingResults = null
+        LocalAgent.reset()
         log("— Neues Gespräch —")
     }
 
@@ -71,7 +72,7 @@ object Agent {
         stopRequested = false
         Thread {
             try {
-                loop(app)
+                route(app, command)
             } catch (e: Exception) {
                 log("⚠️ ${e.message}")
                 Speaker.say("Es gab einen Fehler.")
@@ -84,6 +85,65 @@ object Agent {
                 WakeWordService.resume(app)
             }
         }.start()
+    }
+
+    /** Hybrid-Weiche: lokal zuerst, Claude nur wenn nötig (und erlaubt). */
+    private fun route(ctx: Context, command: String) {
+        val mode = Prefs.brain(ctx)
+        val lc = command.lowercase()
+        val forceCloud = lc.startsWith("claude") || lc.contains("mit claude")
+        val hasKey = Prefs.apiKey(ctx).isNotBlank()
+
+        if ((mode == "cloud" || forceCloud) && hasKey) { cloud(ctx); return }
+
+        if (LocalBrain.available(ctx)) {
+            // Cloud-Verlauf nicht mit lokalem Auftrag vermischen
+            messages = JSONArray(); pendingResults = null
+            val hybrid = mode == "hybrid" && hasKey
+            val r = LocalAgent.run(ctx, command, hybrid, { stopRequested }) { say(it) }
+            if (r == LocalAgent.Result.DONE) Memory.addHistory(ctx, command, "(lokal erledigt)")
+            when (r) {
+                LocalAgent.Result.ESCALATE, LocalAgent.Result.FAILED -> {
+                    if (!hybrid) {
+                        if (r == LocalAgent.Result.FAILED) say("Das konnte ich lokal leider nicht lösen.")
+                        return
+                    }
+                    if (askCloud()) {
+                        messages = JSONArray()
+                        messages.put(JSONObject().put("role", "user").put("content", command))
+                        cloud(ctx)
+                    } else say("In Ordnung, dann lasse ich es.")
+                }
+                LocalAgent.Result.STOPPED -> log("⏹ Gestoppt.")
+                else -> {}
+            }
+            return
+        }
+        if (hasKey && mode != "local") { cloud(ctx); return }
+        say("Ich habe noch kein lokales Gehirn. Tippe auf GEHIRN und lade ein Modell in deinen Handyspeicher.")
+        messages = JSONArray(); pendingResults = null
+    }
+
+    private fun askCloud(): Boolean {
+        val q = "Das ist für mein lokales Gehirn zu schwierig. Soll ich Claude nutzen? Das kostet etwas Guthaben."
+        val ov = JarvisService.instance?.overlay
+        if (ov == null) { say(q + " Sag dann einfach «mit Claude» vor deinem Auftrag."); return false }
+        Speaker.say(q)
+        log("❓ $q")
+        return ov.confirm("Claude nutzen? (kostet Guthaben)")
+    }
+
+    private fun cloud(ctx: Context) {
+        try {
+            loop(ctx)
+        } catch (e: ApiException) {
+            messages = JSONArray(); pendingResults = null
+            if (e.message?.contains("credit", ignoreCase = true) == true) {
+                Prefs.setCloudBlockedUntil(ctx, System.currentTimeMillis() + 6 * 3600_000L)
+                say("Dein Claude-Guthaben ist leer. Ich arbeite deshalb mit meinem lokalen Gehirn weiter." +
+                    if (!LocalBrain.available(ctx)) " Lade dafür unter GEHIRN ein Modell herunter." else "")
+            } else throw e
+        }
     }
 
     private fun say(text: String) {

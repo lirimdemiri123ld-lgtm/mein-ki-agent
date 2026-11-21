@@ -115,7 +115,7 @@ class MainActivity : Activity() {
         val explicit = i?.getBooleanExtra(EXTRA_LISTEN, false) == true
         val assist = i?.action == Intent.ACTION_ASSIST
         val launcher = i?.action == Intent.ACTION_MAIN && Prefs.autoListen(this)
-        if ((explicit || assist || launcher) && Prefs.apiKey(this).isNotBlank() && !Agent.running) {
+        if ((explicit || assist || launcher) && (Prefs.apiKey(this).isNotBlank() || LocalBrain.available(this)) && !Agent.running) {
             main.postDelayed({ listen() }, 450)
         }
     }
@@ -164,7 +164,7 @@ class MainActivity : Activity() {
         main.removeCallbacks(frameTick); main.post(frameTick)
         main.removeCallbacks(secondTick); main.post(secondTick)
         refreshNet(force = false)
-        if (Insights.isStale(this) && Prefs.proactive(this) && Prefs.apiKey(this).isNotBlank()) {
+        if (Insights.isStale(this) && Prefs.proactive(this)) {
             Thread { Insights.run(applicationContext, notify = false) }.start()
         }
         panels.forEachIndexed { i, p -> if (p.alpha < 1f) p.reveal(150L + i * 120L) }
@@ -296,6 +296,7 @@ class MainActivity : Activity() {
         val chipLp = { LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) } }
         chips.addView(chip("■ STOPP") { Agent.stop(); Speaker.stop(); stopListening() }, chipLp())
         chips.addView(chip("↻ NEU") { Agent.reset() }, chipLp())
+        chips.addView(chip("⬢ GEHIRN") { BrainDialog.show(this) }, chipLp())
         chips.addView(chip("◎ STIMME") { voiceMenu() }, chipLp())
         chips.addView(chip("◈ GEDÄCHTNIS") { MemoryDialog.show(this) }, chipLp())
         chips.addView(chip("✦ ANALYSE") { runAnalysis() }, chipLp())
@@ -523,7 +524,7 @@ class MainActivity : Activity() {
     }
 
     private fun runAnalysis() {
-        if (Prefs.apiKey(this).isBlank()) { showSettings(); return }
+        if (Prefs.apiKey(this).isBlank() && !LocalBrain.available(this)) { BrainDialog.show(this); return }
         if (Insights.running) return
         typer.append("✦ Starte eigenständige Analyse …")
         Thread {
@@ -539,11 +540,12 @@ class MainActivity : Activity() {
     private fun updateStatus() {
         fun dot(ok: Boolean) = if (ok) "●" else "○"
         val acc = JarvisService.instance != null
-        val key = Prefs.apiKey(this).isNotBlank()
+        val local = LocalBrain.available(this)
+        val key = local || Prefs.apiKey(this).isNotBlank()
         val wake = Prefs.wakeWord(this) && WakeWordService.running
         val msg = NotificationStore.hasAccess(this)
         val neuro = Prefs.neuralVoice(this).isNotBlank()
-        statusLine.text = "${dot(acc)} ZUGRIFF  ${dot(key)} KERN  ${dot(wake)} WACHWORT  ${dot(msg)} KOMM  ${dot(neuro)} NEURO"
+        statusLine.text = "${dot(acc)} ZUGRIFF  ${dot(key)} ${if (local) "LOKAL" else "KERN"}  ${dot(wake)} WACHWORT  ${dot(msg)} KOMM  ${dot(neuro)} NEURO"
         statusLine.setTextColor(if (acc && key) Hud.CYAN else Hud.ORANGE)
     }
 
@@ -641,7 +643,7 @@ class MainActivity : Activity() {
     }
 
     private fun run(cmd: String) {
-        if (Prefs.apiKey(this).isBlank()) {
+        if (Prefs.apiKey(this).isBlank() && !LocalBrain.available(this)) {
             Toast.makeText(this, "Bitte zuerst den API-Schlüssel eintragen.", Toast.LENGTH_LONG).show()
             showSettings()
             return
