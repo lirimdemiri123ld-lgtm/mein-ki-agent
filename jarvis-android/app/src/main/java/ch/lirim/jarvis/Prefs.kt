@@ -33,6 +33,20 @@ object Prefs {
         p(c).edit().putString("voice", name).putFloat("pitch", pitch).putFloat("rate", rate)
             .putInt("voice_style", style).apply()
 
+    fun city(c: Context): String = (p(c).getString("city", "Pratteln") ?: "Pratteln").ifBlank { "Pratteln" }
+    fun setCity(c: Context, v: String) = p(c).edit().putString("city", v.trim()).apply()
+
+    fun watchlist(c: Context): List<String> =
+        (p(c).getString("watchlist", "^SSMI,^GSPC,NESN.SW,BTC-USD") ?: "")
+            .split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }.take(8)
+    fun setWatchlist(c: Context, v: String) = p(c).edit().putString("watchlist", v).apply()
+
+    fun neuralVoice(c: Context): String = p(c).getString("neural_voice", "") ?: ""
+    fun setNeuralVoice(c: Context, id: String) = p(c).edit().putString("neural_voice", id).apply()
+
+    fun proactive(c: Context): Boolean = p(c).getBoolean("proactive", true)
+    fun setProactive(c: Context, v: Boolean) = p(c).edit().putBoolean("proactive", v).apply()
+
     fun webSearch(c: Context): Boolean = p(c).getBoolean("web_search", true)
     fun setWebSearch(c: Context, v: Boolean) = p(c).edit().putBoolean("web_search", v).apply()
 }

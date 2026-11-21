@@ -22,8 +22,8 @@ object ClaudeClient {
             .put("model", model)
             .put("max_tokens", 2048)
             .put("system", system)
-            .put("tools", tools)
             .put("messages", messages)
+        if (tools.length() > 0) body.put("tools", tools)
 
         val conn = URL(URL_MESSAGES).openConnection() as HttpURLConnection
         try {

@@ -91,6 +91,14 @@ object Tools {
                 .put("app", prop("string", "App-Name, z. B. 'WhatsApp'"))
                 .put("tipp", prop("string", "z. B. 'Neuer Chat: Stift-Symbol unten rechts, dann Name ins Suchfeld'")),
             listOf("app", "tipp")))
+        a.put(tool("nachrichten_lesen", "Liest die neuesten Benachrichtigungen (WhatsApp, E-Mail, SMS, andere Apps) mit Absender und Text."))
+        a.put(tool("live_daten", "Aktuelles Wetter, Börsenkurse und Handy-Status (Akku, Speicher, RAM)."))
+        a.put(tool("projekt_aktualisieren", "Legt ein Projekt von Lirim an oder aktualisiert Fortschritt/Status (erscheint im HUD). fortschritt -1 entfernt das Projekt.",
+            JSONObject()
+                .put("name", prop("string", "Projektname"))
+                .put("fortschritt", prop("integer", "0–100, optional"))
+                .put("status", prop("string", "kurzer Status, optional")),
+            listOf("name")))
         if (webSearch) {
             a.put(JSONObject().put("type", "web_search_20250305").put("name", "web_search").put("max_uses", 3))
         }
@@ -117,6 +125,18 @@ object Tools {
                     if (tips.isEmpty()) res
                     else ToolOutput(res.text + "\n\nDeine gespeicherten Erfahrungen zu dieser App:\n" + tips)
                 }
+                "nachrichten_lesen" -> ToolOutput(NotificationStore.asText(20) +
+                    if (!NotificationStore.hasAccess(c)) "\n(Hinweis: Benachrichtigungszugriff ist nicht erteilt.)" else "")
+                "live_daten" -> {
+                    try { Weather.fetch(c) } catch (_: Exception) {}
+                    try { Stocks.fetch(c) } catch (_: Exception) {}
+                    val s = SystemStats.snapshot(c)
+                    ToolOutput("Wetter: ${Weather.summary()}\nBörse: ${Stocks.summary()}\n" +
+                        "Handy: Akku ${s.battery}%${if (s.charging) " lädt" else ""}, ${"%.0f".format(s.batteryTemp)}°C, RAM ${s.ramGb}, Speicher ${s.storageText}")
+                }
+                "projekt_aktualisieren" -> ToolOutput(Memory.updateProject(c, input.getString("name"),
+                    if (input.has("fortschritt")) input.getInt("fortschritt") else null,
+                    input.optString("status", "")))
                 "merken" -> ToolOutput(Memory.remember(c, input.getString("text"), input.optString("kategorie", "fakt")))
                 "vergessen" -> ToolOutput(Memory.forget(c, input.getString("text")))
                 "erfahrung_speichern" -> ToolOutput(Memory.learn(c, input.getString("app"), input.getString("tipp")))

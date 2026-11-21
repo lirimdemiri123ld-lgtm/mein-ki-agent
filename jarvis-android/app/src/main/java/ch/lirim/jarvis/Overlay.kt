@@ -46,7 +46,7 @@ class Overlay(private val svc: AccessibilityService) {
     private fun orangeBg(oval: Boolean) = GradientDrawable().apply {
         shape = if (oval) GradientDrawable.OVAL else GradientDrawable.RECTANGLE
         if (!oval) cornerRadius = dp(16).toFloat()
-        setColor(0xEEFF6600.toInt())
+        setColor(0xEE0090B8.toInt())
     }
 
     @SuppressLint("ClickableViewAccessibility")

@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 jarvis-android/app/src/main/assets/model-en/
+jarvis-android/app/src/main/jniLibs/
+jarvis-android/app/src/main/assets/voices.json

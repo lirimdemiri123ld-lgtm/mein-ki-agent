@@ -21,6 +21,14 @@ object Memory {
 
     data class Fact(val text: String, val cat: String, val ts: Long)
     data class Entry(val kind: String, val key: String, val text: String)
+    data class Project(val name: String, val progress: Int, val status: String, val ts: Long)
+    data class Tip(val title: String, val text: String)
+
+    private val projects = linkedMapOf<String, Project>()
+    private val tips = mutableListOf<Tip>()
+    private var briefing = ""
+    var insightTs = 0L
+        private set
 
     private var loaded = false
     private val facts = mutableListOf<Fact>()
@@ -55,6 +63,21 @@ object Memory {
                     history.add(x.getString("when") + " – " + x.getString("cmd") to x.optString("result"))
                 }
             }
+            o.optJSONArray("projects")?.let { a ->
+                for (i in 0 until a.length()) {
+                    val x = a.getJSONObject(i)
+                    projects[x.getString("name").lowercase()] =
+                        Project(x.getString("name"), x.optInt("progress"), x.optString("status"), x.optLong("ts"))
+                }
+            }
+            o.optJSONArray("tips")?.let { a ->
+                for (i in 0 until a.length()) {
+                    val x = a.getJSONObject(i)
+                    tips.add(Tip(x.optString("title"), x.optString("text")))
+                }
+            }
+            briefing = o.optString("briefing")
+            insightTs = o.optLong("insight_ts")
         } catch (e: Exception) {
             Agent.log("Gedächtnis konnte nicht gelesen werden: ${e.message}")
         }
@@ -74,6 +97,14 @@ object Memory {
                 put(JSONObject().put("when", parts[0]).put("cmd", parts.getOrElse(1) { "" }).put("result", r))
             }
         })
+        o.put("projects", JSONArray().apply {
+            projects.values.forEach {
+                put(JSONObject().put("name", it.name).put("progress", it.progress).put("status", it.status).put("ts", it.ts))
+            }
+        })
+        o.put("tips", JSONArray().apply { tips.forEach { put(JSONObject().put("title", it.title).put("text", it.text)) } })
+        o.put("briefing", briefing)
+        o.put("insight_ts", insightTs)
         val tmp = File(f.parentFile, "memory.tmp")
         tmp.writeText(o.toString())
         tmp.renameTo(f)
@@ -147,6 +178,41 @@ object Memory {
         save()
     }
 
+    @Synchronized
+    fun updateProject(c: Context, name: String, progress: Int?, status: String?): String {
+        load(c)
+        val key = norm(name)
+        if (key.isEmpty()) return "Projektname fehlt."
+        val old = projects[key]
+        if (progress != null && progress < 0) {
+            projects.remove(key); save(); return "Projekt entfernt."
+        }
+        projects[key] = Project(
+            old?.name ?: name.trim(),
+            (progress ?: old?.progress ?: 0).coerceIn(0, 100),
+            status?.takeIf { it.isNotBlank() } ?: old?.status ?: "",
+            System.currentTimeMillis()
+        )
+        save()
+        Agent.log("📈 Projekt ${name.trim()}: ${projects[key]?.progress}%")
+        return "Projekt aktualisiert."
+    }
+
+    @Synchronized
+    fun projectList(c: Context): List<Project> { load(c); return projects.values.sortedByDescending { it.ts } }
+
+    @Synchronized
+    fun setInsights(c: Context, b: String, list: List<Tip>) {
+        load(c)
+        briefing = b
+        tips.clear(); tips.addAll(list.take(5))
+        insightTs = System.currentTimeMillis()
+        save()
+    }
+
+    @Synchronized
+    fun insights(c: Context): Pair<String, List<Tip>> { load(c); return briefing to tips.toList() }
+
     /** Text für den System-Prompt. */
     @Synchronized
     fun promptBlock(c: Context): String {
@@ -161,6 +227,10 @@ object Memory {
         if (lessons.isNotEmpty()) {
             sb.append("\n## Apps, zu denen du Erfahrungen hast\n")
             sb.append(lessons.keys.joinToString(", ")).append(" (Details kommen beim Öffnen der App)\n")
+        }
+        if (projects.isNotEmpty()) {
+            sb.append("\n## Projekte von Lirim\n")
+            projects.values.forEach { sb.append("- ${it.name}: ${it.progress}% ${it.status}\n") }
         }
         if (history.isNotEmpty()) {
             sb.append("\n## Letzte Aufträge\n")
@@ -194,7 +264,7 @@ object Memory {
     @Synchronized
     fun clearAll(c: Context) {
         load(c)
-        facts.clear(); lessons.clear(); history.clear()
+        facts.clear(); lessons.clear(); history.clear(); projects.clear(); tips.clear(); briefing = ""
         save()
     }
 }

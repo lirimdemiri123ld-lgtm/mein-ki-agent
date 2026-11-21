@@ -45,7 +45,11 @@ android {
         jvmTarget = "17"
     }
     androidResources {
-        noCompress += listOf("mdl", "fst", "conf", "int", "mat", "txt", "uuid")
+        noCompress += listOf("mdl", "fst", "conf", "int", "mat", "uuid")
+    }
+    packaging {
+        jniLibs { pickFirsts += listOf("**/libc++_shared.so") }
+        resources { excludes += listOf("META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/DEPENDENCIES") }
     }
     lint {
         checkReleaseBuilds = false
@@ -56,4 +60,5 @@ android {
 dependencies {
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.47@aar")
+    implementation("org.apache.commons:commons-compress:1.27.1")
 }

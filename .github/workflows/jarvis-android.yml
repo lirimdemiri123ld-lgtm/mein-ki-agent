@@ -49,6 +49,26 @@ jobs:
           espeak-ng -v de -w t_neg.wav "Hallo Marcel, wie geht es dir heute"
           python3 jarvis-android/tools/wake_test.py jarvis-android/app/src/main/assets/model-en t_*.wav 2>&1 | grep -viE "^LOG \(VoskAPI:(ReadDataFiles|RemoveOrphan|CompileLooped|ComputeDerived)" | tail -40
 
+      - name: Neuronale Stimmen (sherpa-onnx) vorbereiten
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=v1.12.40
+          gh api repos/k2-fsa/sherpa-onnx/releases/tags/$V --jq '.assets[].name' | grep -i android || true
+          NAME=$(gh api repos/k2-fsa/sherpa-onnx/releases/tags/$V --jq '.assets[].name' | grep -E "^sherpa-onnx-$V-android\.tar\.bz2$" | head -1)
+          echo "Android-Paket: $NAME"
+          curl -sSL -o sherpa.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/$V/$NAME"
+          mkdir -p sherpa && tar xjf sherpa.tar.bz2 -C sherpa
+          find sherpa -path "*arm64-v8a*" -name "*.so" | head
+          J=jarvis-android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p $J
+          find sherpa -path "*arm64-v8a*" -name "*.so" -exec cp {} $J/ \;
+          ls -la $J
+          gh api --paginate repos/k2-fsa/sherpa-onnx/releases/tags/tts-models --jq '.assets' > tts_assets.json || \
+            gh api "repos/k2-fsa/sherpa-onnx/releases/tags/tts-models" --jq '.assets' > tts_assets.json
+          python3 -c "import json;print(len(json.load(open('tts_assets.json'))),'Assets')"
+          python3 jarvis-android/tools/make_voices.py tts_assets.json jarvis-android/app/src/main/assets/voices.json
+
       - name: APK bauen
         working-directory: jarvis-android
         run: |
