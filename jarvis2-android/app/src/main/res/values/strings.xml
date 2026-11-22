@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Jarvis 2.0</string>
+    <string name="acc_description">Jarvis 2.0 führt Aufträge aus, die du Claude in der Claude-App gibst: Apps öffnen, Bildschirm lesen, tippen und schreiben. Banking- und Bezahl-Apps sind gesperrt. Ausschalten stoppt sofort jeden Zugriff.</string>
+</resources>

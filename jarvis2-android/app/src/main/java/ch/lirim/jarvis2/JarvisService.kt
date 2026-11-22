@@ -1,0 +1,390 @@
+package ch.lirim.jarvis2
+
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Path
+import android.graphics.Rect
+import android.os.Bundle
+import android.util.Base64
+import android.view.Display
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
+/**
+ * Die "Hände und Augen" von Jarvis 2.0: liest den Bildschirm und bedient Apps
+ * (Bedienungshilfe / AccessibilityService). Startet ausserdem den MCP-Server für Claude.
+ */
+class JarvisService : AccessibilityService() {
+
+    companion object {
+        @Volatile var instance: JarvisService? = null
+        private const val MAX_NODES = 160
+    }
+
+    /** Der MCP-Server, über den Claude Aufträge schickt. Läuft, solange die Bedienungshilfe eingeschaltet ist. */
+    var mcp: McpServer? = null
+        private set
+
+    private val nodes = HashMap<Int, AccessibilityNodeInfo>()
+    var lastShotInfo: String = ""
+        private set
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        instance = this
+        startMcp()
+    }
+
+    fun startMcp() {
+        if (mcp?.running == true) return
+        try {
+            val host = PhoneTools(this)
+            mcp = McpServer(Prefs.PORT, { Prefs.secretPath(this) }, host, Apps.versionName(this)).also { it.start() }
+        } catch (e: Exception) {
+            ActionLog.add("Server-Start fehlgeschlagen: ${e.message}")
+        }
+    }
+
+    /** Paketname der App im Vordergrund. */
+    fun foregroundPackage(): String = rootInActiveWindow?.packageName?.toString() ?: ""
+
+    @Volatile private var lastEvent = 0L
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) { lastEvent = android.os.SystemClock.uptimeMillis() }
+
+    /** Wartet, bis sich der Bildschirm beruhigt hat (statt fester Pausen): schneller und zuverlässiger. */
+    fun waitSettled(maxMs: Long = 2500, quietMs: Long = 450) {
+        val start = android.os.SystemClock.uptimeMillis()
+        Thread.sleep(250)
+        while (android.os.SystemClock.uptimeMillis() - start < maxMs) {
+            if (android.os.SystemClock.uptimeMillis() - lastEvent >= quietMs) return
+            Thread.sleep(60)
+        }
+    }
+
+    /** Klickbares Element, dessen Beschriftung auf das Muster passt (oder dessen ID so endet). */
+    fun findClickable(label: Regex, idSuffix: String = ""): Int? {
+        readScreen()
+        synchronized(nodes) {
+            return nodes.entries.sortedBy { it.key }.firstOrNull { (_, n) ->
+                val l = ((n.contentDescription ?: "").toString() + " " + (n.text ?: "").toString()).trim()
+                val idOk = idSuffix.isNotEmpty() && (n.viewIdResourceName ?: "").endsWith("/$idSuffix")
+                n.isClickable && n.isEnabled && ((l.isNotEmpty() && label.containsMatchIn(l)) || idOk)
+            }?.key
+        }
+    }
+
+    /** Inhalt des (ersten) Eingabefelds auf dem Bildschirm. */
+    fun editText(): String? {
+        readScreen()
+        synchronized(nodes) {
+            return nodes.entries.sortedBy { it.key }.firstOrNull { it.value.isEditable }?.value?.text?.toString()
+        }
+    }
+    override fun onInterrupt() {}
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        instance = null
+        mcp?.stop(); mcp = null
+        return super.onUnbind(intent)
+    }
+
+    override fun onDestroy() {
+        instance = null
+        mcp?.stop(); mcp = null
+        super.onDestroy()
+    }
+
+    // ---------------------------------------------------------------- Bildschirm lesen
+
+    fun readScreen(): String {
+        val sb = StringBuilder()
+        synchronized(nodes) {
+            nodes.clear()
+            val roots = mutableListOf<AccessibilityNodeInfo>()
+            var keyboard = false
+            try {
+                for (w in windows) {
+                    // Die Tastatur (≈ 40 Tasten) wird nicht mitgeschickt – spart bei jedem Schritt viele Tokens
+                    if (w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) { keyboard = true; continue }
+                    val keep = when (w.type) {
+                        AccessibilityWindowInfo.TYPE_APPLICATION -> true
+                        AccessibilityWindowInfo.TYPE_SYSTEM -> w.isActive || w.isFocused
+                        else -> false
+                    }
+                    if (!keep) continue
+                    w.root?.let { roots.add(it) }
+                }
+            } catch (e: Exception) {
+                // ignorieren, Fallback unten
+            }
+            if (roots.isEmpty()) rootInActiveWindow?.let { roots.add(it) }
+
+            val pkg = rootInActiveWindow?.packageName?.toString() ?: "?"
+            val dm = resources.displayMetrics
+            sb.append("App im Vordergrund: ").append(Apps.labelFor(this, pkg))
+                .append(" (").append(pkg).append(")")
+                .append(", Bildschirm ").append(dm.widthPixels).append("x").append(dm.heightPixels).append(" px\n")
+
+            for (r in roots) {
+                val rp = r.packageName?.toString() ?: ""
+                if (rp != pkg) sb.append("--- Fenster: ").append(Apps.labelFor(this, rp)).append(" ---\n")
+                walk(r, sb)
+            }
+            if (keyboard) sb.append("(Tastatur ist offen)\n")
+            if (nodes.isEmpty()) {
+                sb.append("(Keine lesbaren Elemente. Nutze screenshot und tippen_xy.)\n")
+            } else if (nodes.size >= MAX_NODES) {
+                sb.append("(Liste gekürzt – evtl. scrollen.)\n")
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun walk(n: AccessibilityNodeInfo, sb: StringBuilder) {
+        if (nodes.size >= MAX_NODES) return
+        if (!n.isVisibleToUser) return
+        val text = n.text?.toString()?.trim()?.replace("\n", " ").orEmpty()
+        val desc = n.contentDescription?.toString()?.trim()?.replace("\n", " ").orEmpty()
+        val hint = n.hintText?.toString()?.trim().orEmpty()
+        val interesting = text.isNotEmpty() || desc.isNotEmpty() || n.isClickable ||
+            n.isEditable || n.isScrollable || n.isCheckable || n.isLongClickable
+
+        if (interesting) {
+            val id = nodes.size + 1
+            nodes[id] = n
+            val r = Rect()
+            n.getBoundsInScreen(r)
+            // Kompakt (spart Tokens): Klassenname nur bei Eingabefeldern, Koordinaten nur ohne Text
+            sb.append('[').append(id).append(']')
+            if (n.isEditable) sb.append(" Eingabe")
+            if (text.isNotEmpty()) sb.append(" \"").append(text.take(80)).append('"')
+            if (desc.isNotEmpty() && desc != text) sb.append(" (").append(desc.take(60)).append(')')
+            if (hint.isNotEmpty() && hint != text) sb.append(" {").append(hint.take(40)).append('}')
+            val flags = mutableListOf<String>()
+            if (n.isClickable && !n.isEditable) flags.add("k")
+            if (n.isScrollable) flags.add("scroll")
+            if (n.isCheckable) flags.add(if (n.isChecked) "AN" else "AUS")
+            if (n.isSelected) flags.add("gewählt")
+            if (n.isFocused) flags.add("fokus")
+            if (!n.isEnabled) flags.add("aus")
+            if (flags.isNotEmpty()) sb.append(" ").append(flags.joinToString(","))
+            if (text.isEmpty() && desc.isEmpty()) sb.append(" @").append(r.centerX()).append(',').append(r.centerY())
+            sb.append('\n')
+        }
+        for (i in 0 until n.childCount) {
+            val c = n.getChild(i) ?: continue
+            walk(c, sb)
+        }
+    }
+
+    private fun node(id: Int): AccessibilityNodeInfo? = synchronized(nodes) { nodes[id] }
+
+    /** Sichtbarer Text eines Elements (für das Lernen von Abläufen). */
+    fun labelOf(id: Int): String? {
+        val n = node(id) ?: return null
+        val t = n.text?.toString()?.trim().orEmpty()
+        if (t.isNotEmpty() && !n.isEditable) return t
+        val d = n.contentDescription?.toString()?.trim().orEmpty()
+        if (d.isNotEmpty()) return d
+        // Klickbarer Container ohne Text: ersten Text eines Kindes nehmen
+        for (i in 0 until n.childCount) {
+            val c = n.getChild(i) ?: continue
+            val ct = c.text?.toString()?.trim().orEmpty().ifEmpty { c.contentDescription?.toString()?.trim().orEmpty() }
+            if (ct.isNotEmpty()) return ct
+        }
+        return null
+    }
+
+    /** Text in das passende Eingabefeld schreiben (für abgespielte Abläufe). */
+    fun typeAny(text: String, submit: Boolean): String {
+        if (findFocus(AccessibilityNodeInfo.FOCUS_INPUT) != null) return typeText(null, text, submit)
+        readScreen()
+        val edit = synchronized(nodes) { nodes.entries.sortedBy { it.key }.firstOrNull { it.value.isEditable }?.key }
+        return typeText(edit, text, submit)
+    }
+
+    // ---------------------------------------------------------------- Aktionen
+
+    fun tap(id: Int): String {
+        val n = node(id) ?: return "Fehler: Element $id nicht gefunden – Bildschirm neu lesen."
+        var c: AccessibilityNodeInfo? = n
+        while (c != null && !c.isClickable) c = c.parent
+        if (c != null && c.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return "Auf [$id] getippt."
+        val r = Rect()
+        n.getBoundsInScreen(r)
+        return if (tapXY(r.centerX().toFloat(), r.centerY().toFloat())) "Auf [$id] getippt (per Koordinaten)."
+        else "Tippen auf [$id] fehlgeschlagen."
+    }
+
+    /** Tippt auf das Element mit diesem sichtbaren Text (oder Beschreibung). */
+    fun tapText(query: String): String {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) return "Fehler: Kein Text angegeben."
+        if (nodes.isEmpty()) readScreen()
+        fun label(n: AccessibilityNodeInfo) =
+            ((n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")).lowercase()
+        val all = synchronized(nodes) { nodes.entries.toList() }
+        val hit = all.map { it to Fuzzy.score(q, label(it.value)) }
+            .filter { it.second >= 55 }.maxByOrNull { it.second }?.first
+        if (hit != null) return tap(hit.key).replace("[${hit.key}]", "«${query.trim()}» [${hit.key}]")
+        val found = rootInActiveWindow?.findAccessibilityNodeInfosByText(query.trim())?.firstOrNull()
+            ?: return "Kein Element mit «${query.trim()}» auf dem Bildschirm. Evtl. scrollen oder suchen."
+        var c: AccessibilityNodeInfo? = found
+        while (c != null && !c.isClickable) c = c.parent
+        if (c != null && c.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return "Auf «${query.trim()}» getippt."
+        val r = Rect(); found.getBoundsInScreen(r)
+        return if (tapXY(r.centerX().toFloat(), r.centerY().toFloat())) "Auf «${query.trim()}» getippt." else "Tippen auf «${query.trim()}» fehlgeschlagen."
+    }
+
+    fun longPress(id: Int): String {
+        val n = node(id) ?: return "Fehler: Element $id nicht gefunden."
+        var c: AccessibilityNodeInfo? = n
+        while (c != null && !c.isLongClickable) c = c.parent
+        if (c != null && c.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) return "Lange auf [$id] gedrückt."
+        val r = Rect()
+        n.getBoundsInScreen(r)
+        return if (gesture(linePath(r.centerX().toFloat(), r.centerY().toFloat(), r.centerX().toFloat(), r.centerY().toFloat()), 900))
+            "Lange auf [$id] gedrückt (per Koordinaten)." else "Langes Drücken fehlgeschlagen."
+    }
+
+    fun tapXY(x: Float, y: Float): Boolean = gesture(linePath(x, y, x, y), 60)
+
+    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, ms: Long): Boolean =
+        gesture(linePath(x1, y1, x2, y2), ms.coerceIn(50, 3000))
+
+    private fun linePath(x1: Float, y1: Float, x2: Float, y2: Float): Path = Path().apply {
+        moveTo(x1, y1)
+        if (x1 != x2 || y1 != y2) lineTo(x2, y2)
+    }
+
+    private fun gesture(path: Path, duration: Long): Boolean {
+        val g = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+            .build()
+        val latch = CountDownLatch(1)
+        var ok = false
+        val dispatched = dispatchGesture(g, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                ok = true
+                latch.countDown()
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                latch.countDown()
+            }
+        }, null)
+        if (!dispatched) return false
+        latch.await(duration + 3000, TimeUnit.MILLISECONDS)
+        return ok
+    }
+
+    fun typeText(id: Int?, text: String, submit: Boolean): String {
+        val first: AccessibilityNodeInfo = (if (id != null) node(id) else null)
+            ?: findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?: return "Fehler: Kein Eingabefeld gefunden. Tippe zuerst auf das Feld."
+
+        var t: AccessibilityNodeInfo = first
+        if (!first.isEditable) {
+            first.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            Thread.sleep(500)
+            val focused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (focused != null) t = focused
+        }
+        t.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        val args = Bundle()
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        val ok = t.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        if (!ok) return "Text konnte nicht eingegeben werden."
+        if (submit) {
+            Thread.sleep(300)
+            t.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+        }
+        return "Text eingegeben" + if (submit) " und bestätigt." else "."
+    }
+
+    fun scroll(direction: String, id: Int?): String {
+        if (id != null) {
+            var c: AccessibilityNodeInfo? = node(id)
+            while (c != null && !c.isScrollable) c = c.parent
+            if (c != null) {
+                val action = when (direction) {
+                    "hoch", "links" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                    else -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                }
+                if (c.performAction(action)) return "Gescrollt ($direction)."
+            }
+        }
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels.toFloat()
+        val h = dm.heightPixels.toFloat()
+        val ok = when (direction) {
+            "hoch" -> swipe(w / 2, h * 0.30f, w / 2, h * 0.75f, 400)
+            "links" -> swipe(w * 0.15f, h / 2, w * 0.85f, h / 2, 350)
+            "rechts" -> swipe(w * 0.85f, h / 2, w * 0.15f, h / 2, 350)
+            else -> swipe(w / 2, h * 0.75f, w / 2, h * 0.30f, 400)
+        }
+        return if (ok) "Gescrollt ($direction)." else "Scrollen fehlgeschlagen."
+    }
+
+    fun press(key: String): String {
+        val ok = when (key) {
+            "zurueck" -> performGlobalAction(GLOBAL_ACTION_BACK)
+            "home" -> performGlobalAction(GLOBAL_ACTION_HOME)
+            "letzte_apps" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
+            "benachrichtigungen" -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+            "schnelleinstellungen" -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
+            "enter" -> findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                ?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id) ?: false
+            else -> return "Unbekannte Taste '$key'."
+        }
+        return if (ok) "Taste '$key' gedrückt." else "Taste '$key' fehlgeschlagen."
+    }
+
+    // ---------------------------------------------------------------- Screenshot
+
+    fun screenshot(): String? {
+        val latch = CountDownLatch(1)
+        var result: String? = null
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(shot: ScreenshotResult) {
+                    try {
+                        val hb = shot.hardwareBuffer
+                        val bmp = Bitmap.wrapHardwareBuffer(hb, shot.colorSpace)
+                        if (bmp != null) {
+                            val soft = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                            val targetW = 720
+                            val factor = soft.width.toFloat() / targetW
+                            val targetH = (soft.height / factor).toInt()
+                            val scaled = Bitmap.createScaledBitmap(soft, targetW, targetH, true)
+                            val bos = ByteArrayOutputStream()
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 60, bos)
+                            result = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
+                            lastShotInfo = "Screenshot ${targetW}x$targetH px. Echter Bildschirm ${soft.width}x${soft.height} px. " +
+                                String.format(java.util.Locale.US, "Für tippen_xy die Bild-Koordinaten mit %.2f multiplizieren.", factor)
+                        }
+                        hb.close()
+                    } catch (e: Exception) {
+                        result = null
+                    }
+                    latch.countDown()
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    latch.countDown()
+                }
+            })
+        } catch (e: Exception) {
+            return null
+        }
+        latch.await(6, TimeUnit.SECONDS)
+        return result
+    }
+}

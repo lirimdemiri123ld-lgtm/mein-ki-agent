@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Jarvis 2.0: dunkles Symbol mit orangem Ring und Knotenpunkten (Verbindung zu Claude) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#1C1C1E"
+        android:pathData="M54,4 A50,50 0 1,1 53.99,4 Z" />
+    <path
+        android:strokeColor="#FF6600"
+        android:strokeWidth="6"
+        android:fillColor="#00000000"
+        android:pathData="M54,20 A34,34 0 1,1 53.99,20 Z" />
+    <path
+        android:strokeColor="#FAE2D3"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M40,44 L54,54 L68,44 M54,54 L54,70" />
+    <path android:fillColor="#FF6600" android:pathData="M40,38 A6,6 0 1,1 39.99,38 Z" />
+    <path android:fillColor="#FF6600" android:pathData="M68,38 A6,6 0 1,1 67.99,38 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M54,47 A7,7 0 1,1 53.99,47 Z" />
+    <path android:fillColor="#FF6600" android:pathData="M54,64 A6,6 0 1,1 53.99,64 Z" />
+</vector>

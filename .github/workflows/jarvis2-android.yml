@@ -1,0 +1,56 @@
+name: Jarvis 2.0 Android bauen
+
+on:
+  push:
+    branches: [jarvis2]
+    paths:
+      - 'jarvis2-android/**'
+      - '.github/workflows/jarvis2-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Unit-Tests (MCP-Protokoll)
+        working-directory: jarvis2-android
+        run: gradle testReleaseUnitTest --no-daemon -q
+
+      - name: APK bauen
+        working-directory: jarvis2-android
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon 2>&1 | tee build.log
+
+      - name: Fehler anzeigen
+        if: failure()
+        run: |
+          grep -E "^e: |error:|What went wrong|Could not|> " jarvis2-android/build.log | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+
+      - name: Als Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp jarvis2-android/app/build/outputs/apk/release/app-release.apk Jarvis2.apk
+          gh release delete jarvis2-latest -y --cleanup-tag || true
+          gh release create jarvis2-latest Jarvis2.apk \
+            --target "${{ github.sha }}" \
+            --prerelease \
+            --title "Jarvis 2.0 – neueste Version" \
+            --notes "Build ${{ github.run_number }}. Auf dem Handy öffnen, Jarvis2.apk herunterladen und installieren. Läuft neben dem alten Jarvis."
