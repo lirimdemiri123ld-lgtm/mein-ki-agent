@@ -22,6 +22,7 @@ class JarvisNotificationListener : NotificationListenerService() {
         if (title.isEmpty() && text.isEmpty()) return
         if (n.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         NotificationStore.add(Apps.labelFor(this, n.packageName), n.packageName, title, text)
+        TopUp.check(this, title, text)
     }
 }
 
@@ -53,5 +54,37 @@ object NotificationStore {
         val flat = Settings.Secure.getString(c.contentResolver, "enabled_notification_listeners") ?: return false
         val me = ComponentName(c, JarvisNotificationListener::class.java).flattenToString()
         return flat.split(":").any { it == me }
+    }
+}
+
+/**
+ * Aufladung bei Anthropic erkennen (Quittungs-Mail «Your receipt from Anthropic …»).
+ * Steht der Betrag in der Meldung, wird er automatisch zum Guthaben addiert; sonst fragt Jarvis beim nächsten Öffnen.
+ */
+object TopUp {
+    private val receipt = Regex("""(?i)anthropic""")
+    private val word = Regex("""(?i)receipt|quittung|beleg|payment|zahlung|credit""")
+    private val amount = Regex("""(?:US\$|USD|\$)\s?(\d{1,4}(?:[.,]\d{2})?)""")
+
+    fun check(c: android.content.Context, title: String, text: String) {
+        val all = "$title $text"
+        if (!receipt.containsMatchIn(all) || !word.containsMatchIn(all)) return
+        val id = Regex("""#[\d-]{6,}""").find(all)?.value ?: all.take(60)
+        if (Prefs.lastTopUpId(c) == id) return
+        Prefs.setLastTopUpId(c, id)
+        val usd = amount.find(all)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+        if (usd != null && usd > 0) {
+            add(c, usd)
+            Agent.log("💳 Aufladung erkannt: +%.2f \$ – Guthaben jetzt ≈ %.2f \$".format(java.util.Locale.US, usd, Prefs.creditBalance(c) ?: usd))
+        } else {
+            Prefs.setPendingTopUp(c, true)
+            Agent.log("💳 Anthropic-Quittung erkannt – beim nächsten Öffnen frage ich nach dem Betrag.")
+        }
+    }
+
+    fun add(c: android.content.Context, usd: Double) {
+        Prefs.setCreditBalance(c, (Prefs.creditBalance(c)?.coerceAtLeast(0.0) ?: 0.0) + usd)
+        Prefs.setCloudBlockedUntil(c, 0L)
+        Prefs.setPendingTopUp(c, false)
     }
 }

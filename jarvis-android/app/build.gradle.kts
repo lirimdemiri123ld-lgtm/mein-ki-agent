@@ -64,5 +64,8 @@ dependencies {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        // NICHT ENTFERNEN: Die neuronalen Stimmen (sherpa-onnx) rufen die Kotlin-Lambda per JNI über
+        // «invoke([F)Ljava/lang/Integer;» auf. Ohne echte Lambda-Klassen stürzt die App beim Sprechen ab.
+        freeCompilerArgs.add("-Xlambdas=class")
     }
 }

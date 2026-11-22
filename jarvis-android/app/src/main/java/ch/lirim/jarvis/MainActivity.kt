@@ -179,6 +179,7 @@ class MainActivity : Activity() {
         NotificationStore.listener = { main.post { refreshComms() } }
         updateStatus()
         refreshProjects(); refreshComms(); refreshInsights(); refreshCredit(); refreshAgenda()
+        if (Prefs.pendingTopUp(this)) main.postDelayed({ if (visible) topUpDialog() }, 800)
         main.removeCallbacks(frameTick); main.post(frameTick)
         main.removeCallbacks(secondTick); main.post(secondTick)
         refreshNet(force = false)
@@ -500,6 +501,21 @@ class MainActivity : Activity() {
             bal < 1.5 -> "Bald aufladen"
             else -> ""
         }
+    }
+
+    /** Nach einer erkannten Anthropic-Quittung: nur den aufgeladenen Betrag antippen. */
+    private fun topUpDialog() {
+        if (!Prefs.pendingTopUp(this)) return
+        val opts = arrayOf("5 \$", "10 \$", "20 \$", "Anderer Betrag …", "Nicht aufgeladen")
+        AlertDialog.Builder(this).setTitle("Aufladung bei Anthropic erkannt – wie viel?")
+            .setItems(opts) { _, i ->
+                when (i) {
+                    0 -> TopUp.add(this, 5.0); 1 -> TopUp.add(this, 10.0); 2 -> TopUp.add(this, 20.0)
+                    3 -> { Prefs.setPendingTopUp(this, false); creditDialog() }
+                    else -> Prefs.setPendingTopUp(this, false)
+                }
+                refreshCredit()
+            }.show()
     }
 
     private fun creditDialog() {

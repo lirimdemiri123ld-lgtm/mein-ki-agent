@@ -115,4 +115,9 @@ object Prefs {
     /** Sprache der Spracherkennung: «de-CH» (Standard) oder «de-DE». */
     fun sttLang(c: Context): String = p(c).getString("stt_lang", "de-CH") ?: "de-CH"
     fun setSttLang(c: Context, v: String) = p(c).edit().putString("stt_lang", v).apply()
+
+    fun lastTopUpId(c: Context): String = p(c).getString("topup_id", "") ?: ""
+    fun setLastTopUpId(c: Context, v: String) = p(c).edit().putString("topup_id", v).apply()
+    fun pendingTopUp(c: Context): Boolean = p(c).getBoolean("topup_pending", false)
+    fun setPendingTopUp(c: Context, v: Boolean) = p(c).edit().putBoolean("topup_pending", v).apply()
 }
