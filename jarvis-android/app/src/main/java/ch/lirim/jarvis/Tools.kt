@@ -134,15 +134,7 @@ object Tools {
                 "anrufen" -> {
                     val wen = input.optString("wen").ifBlank { input.optString("name").ifBlank { input.optString("nummer") } }
                     if (wen.isBlank()) return ToolOutput("Wen soll ich anrufen?")
-                    val hit = Contacts.search(c, wen).firstOrNull()
-                    val label = hit?.let { "${it.name} (${it.number})" } ?: wen
-                    val ov = svc?.overlay
-                    if (ov != null && System.currentTimeMillis() - lastYes > 90_000) {
-                        Speaker.say("Soll ich $label anrufen?")
-                        Agent.log("❓ $label anrufen?")
-                        if (!ov.confirm("$label anrufen?")) return ToolOutput("Lirim hat NEIN getippt. Nicht anrufen.")
-                    }
-                    after(svc, Contacts.call(c, hit?.number ?: wen).let { if (hit != null) it.replace(hit.number, "${hit.name}, ${hit.number}") else it }, 1500)
+                    callWithChoice(c, svc, wen)
                 }
                 "nachrichten_lesen" -> ToolOutput(NotificationStore.asText(20) +
                     if (!NotificationStore.hasAccess(c)) "\n(Hinweis: Benachrichtigungszugriff ist nicht erteilt.)" else "")
@@ -248,6 +240,45 @@ object Tools {
         } catch (e: Exception) {
             ToolOutput("Fehler bei $name: ${e.message}")
         }
+    }
+
+    /**
+     * Anrufen mit Auswahl: Gibt es mehrere passende Kontakte (z. B. zwei «Gruja»), fragt Jarvis
+     * nacheinander per Stimme – Schweizer Nummern zuerst. Die Wahl wird gemerkt.
+     */
+    private fun callWithChoice(c: Context, svc: JarvisService?, wen: String): ToolOutput {
+        val digits = wen.filter { it.isDigit() || it == '+' }
+        val candidates = mutableListOf<Contacts.Hit>()
+        if (digits.length >= 6) candidates.add(Contacts.Hit(wen, digits))
+        else {
+            Prefs.chosenNumber(c, wen)?.let { (n, num) -> candidates.add(Contacts.Hit(n, num)) }
+            // Nummer im Gedächtnis («Gruja = +41 79 …»)?
+            Memory.factTexts(c).filter { f -> ch.lirim.jarvis.core.Fuzzy.score(wen, f) >= 70 }
+                .mapNotNull { f -> Regex("""(\+|00)?\d[\d ]{7,}\d""").find(f)?.value?.let { Contacts.Hit(wen, it.replace(" ", "")) } }
+                .forEach { candidates.add(it) }
+            val scored = Contacts.searchScored(c, wen)
+            val best = scored.firstOrNull()?.second ?: 0
+            scored.filter { it.second >= best - 25 }.forEach { candidates.add(it.first) }
+        }
+        val list = candidates.distinctBy { it.number.filter(Char::isDigit).takeLast(9) }.take(3)
+        if (list.isEmpty()) return ToolOutput(if (!Contacts.canRead(c)) "Kein Zugriff auf Kontakte – bitte unter ZUGRIFF erlauben." else "Kein Kontakt «$wen» gefunden.")
+        val ov = svc?.overlay
+        for ((i, h) in list.withIndex()) {
+            val where = if (Contacts.isSwiss(h.number)) "" else " (Ausland)"
+            val spoken = "${h.name}$where, ${h.number.takeLast(4).toList().joinToString(" ")} am Ende"
+            if (ov != null && (list.size > 1 || System.currentTimeMillis() - lastYes > 90_000)) {
+                val q = if (list.size > 1) "${if (i == 0) "Ich habe ${list.size} passende Kontakte. " else ""}Soll ich $spoken anrufen?"
+                        else "Soll ich ${h.name} anrufen?"
+                Speaker.say(q)
+                Agent.log("❓ ${h.name} (${h.number}) anrufen?")
+                if (!ov.confirm("${h.name} (${h.number}) anrufen?")) { Agent.log("❌ Nein"); continue }
+                Agent.log("✅ Ja")
+            }
+            if (list.size > 1) Prefs.setChosenNumber(c, wen, h.name, h.number)
+            return after(svc, Contacts.call(c, h.number).replace(h.number, "${h.name}, ${h.number}"), 1500)
+        }
+        return ToolOutput("Lirim hat NEIN gesagt. Nicht anrufen. " +
+            if (list.size > 1) "Frag ihn nach dem genauen Namen oder der Nummer." else "")
     }
 
     private fun after(svc: JarvisService?, msg: String, delayMs: Long = 900): ToolOutput {

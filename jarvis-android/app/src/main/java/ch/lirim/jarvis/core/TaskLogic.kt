@@ -23,7 +23,8 @@ object TaskLogic {
         val c = command.lowercase().trim()
         val action = listOf("öffne", "starte", "ruf", "anruf", "schreib", "schick", "send", "stell", "wecker", "timer",
             "merk", "vergiss", "such", "spiel", "zeig", "lies", "les ", "mach", "tipp", "geh ", "buch", "bestell",
-            "navigier", "fahr", "whatsapp", "mail", "kalender", "termin", "nachricht", "projekt")
+            "navigier", "fahr", "whatsapp", "mail", "kalender", "termin", "nachricht", "projekt",
+            "speicher", "falsch", "korrigier", "änder", "nummer", "kontakt", "notier")
         if (action.any { c.contains(it) }) return false
         return true
     }

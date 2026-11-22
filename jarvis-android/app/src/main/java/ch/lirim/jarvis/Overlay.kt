@@ -167,7 +167,10 @@ class Overlay(private val svc: AccessibilityService) {
             yesBtn?.visibility = View.VISIBLE
             noBtn?.visibility = View.VISIBLE
         }
+        val voice = VoiceAnswer(svc) { yes -> if (confirmLatch === latch) main.post { answer(yes) } }
+        Thread { voice.run(latch) }.start()
         latch.await(120, TimeUnit.SECONDS)
+        voice.cancel()
         confirmLatch = null
         main.post { yesBtn?.visibility = View.GONE; noBtn?.visibility = View.GONE }
         return confirmAnswer

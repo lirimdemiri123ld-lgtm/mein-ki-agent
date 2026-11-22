@@ -96,4 +96,11 @@ object Prefs {
         if (p(c).getString("saved_month", "") == monthKey()) p(c).getInt("saved_n", 0) else 0
     fun addSaved(c: Context) =
         p(c).edit().putString("saved_month", monthKey()).putInt("saved_n", savedTasks(c) + 1).apply()
+
+    /** Gemerkte Kontaktwahl («gruja» → Name + Nummer). */
+    private fun key(q: String) = "call_" + q.lowercase().replace(Regex("[^a-zäöü0-9]"), "")
+    fun chosenNumber(c: Context, q: String): Pair<String, String>? =
+        p(c).getString(key(q), null)?.split("|")?.takeIf { it.size == 2 }?.let { it[0] to it[1] }
+    fun setChosenNumber(c: Context, q: String, name: String, number: String) =
+        p(c).edit().putString(key(q), "$name|$number").apply()
 }

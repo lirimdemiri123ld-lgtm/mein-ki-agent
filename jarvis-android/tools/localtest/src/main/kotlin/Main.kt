@@ -110,6 +110,9 @@ Hintergrundwissen über Lirim:
     for (c in listOf("Hallo Jarvis, stell einen Wecker um 6:30", "weck mich um halb 7", "Timer 5 Minuten", "Ruf Gruja an",
         "Öffne WhatsApp", "Öffne WhatsApp und schreib Ali", "Wie geht es dir?"))
         println("  $c → ${ch.lirim.jarvis.core.QuickIntents.parse(c)}")
+    println("=== Ja/Nein per Stimme")
+    for (t in listOf("Ja", "jo mach", "ja bitte", "nein", "nei danke", "lieber nicht", "genau", "was?"))
+        println("  «$t» → ${ch.lirim.jarvis.core.YesNo.parse(t)}")
     println("=== Gelernte Abläufe")
     val S = ch.lirim.jarvis.core.Recipes::Step
     val rec = listOf(S("app_oeffnen", mapOf("name" to "WhatsApp")), S("tippen", mapOf("text" to "Suchen")),

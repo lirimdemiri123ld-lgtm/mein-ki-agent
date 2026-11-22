@@ -18,7 +18,16 @@ object Contacts {
         .replace("ä", "a").replace("ö", "o").replace("ü", "u").replace("é", "e").replace("ë", "e").replace("ç", "c")
         .replace(Regex("[^a-z0-9 ]"), "").trim()
 
-    fun search(c: Context, query: String, limit: Int = 5): List<Hit> {
+    /** Schweizer Nummer? (+41, 0041 oder 0…) */
+    fun isSwiss(number: String): Boolean {
+        val d = number.filter { it.isDigit() || it == '+' }
+        return d.startsWith("+41") || d.startsWith("0041") || (d.startsWith("0") && !d.startsWith("00"))
+    }
+
+    fun search(c: Context, query: String, limit: Int = 5): List<Hit> = searchScored(c, query, limit).map { it.first }
+
+    /** Treffer mit Punktzahl; Schweizer Nummern werden bevorzugt. */
+    fun searchScored(c: Context, query: String, limit: Int = 5): List<Pair<Hit, Int>> {
         if (!canRead(c)) return emptyList()
         val q = norm(query)
         if (q.isEmpty()) return emptyList()
@@ -45,7 +54,8 @@ object Contacts {
             })
         }
         return all.map { it to score(it) }.filter { it.second >= 20 }
-            .sortedByDescending { it.second }.map { it.first }.distinctBy { it.number.filter(Char::isDigit) }.take(limit)
+            .map { it.first to it.second + if (isSwiss(it.first.number)) 8 else 0 }
+            .sortedByDescending { it.second }.distinctBy { it.first.number.filter(Char::isDigit).takeLast(9) }.take(limit)
     }
 
     fun describe(c: Context, query: String): String {
