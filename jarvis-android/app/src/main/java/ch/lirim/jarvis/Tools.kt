@@ -11,6 +11,7 @@ class ToolOutput(val text: String, val imageB64: String? = null)
 
 /** Werkzeuge, die Claude aufrufen kann. */
 object Tools {
+    @Volatile private var lastYes = 0L
 
     private fun prop(type: String, desc: String) = JSONObject().put("type", type).put("description", desc)
 
@@ -136,7 +137,7 @@ object Tools {
                     val hit = Contacts.search(c, wen).firstOrNull()
                     val label = hit?.let { "${it.name} (${it.number})" } ?: wen
                     val ov = svc?.overlay
-                    if (ov != null) {
+                    if (ov != null && System.currentTimeMillis() - lastYes > 90_000) {
                         Speaker.say("Soll ich $label anrufen?")
                         Agent.log("❓ $label anrufen?")
                         if (!ov.confirm("$label anrufen?")) return ToolOutput("Lirim hat NEIN getippt. Nicht anrufen.")
@@ -230,6 +231,7 @@ object Tools {
                     Speaker.say(q)
                     Agent.log("❓ $q")
                     val ok = ov.confirm(q)
+                    if (ok) lastYes = System.currentTimeMillis()
                     Agent.log(if (ok) "✅ Ja" else "❌ Nein")
                     ToolOutput(if (ok) "Lirim hat JA getippt. Du darfst fortfahren." else "Lirim hat NEIN getippt oder nicht reagiert. Aktion NICHT ausführen.")
                 }
