@@ -171,7 +171,13 @@ Jetzt: $now.
             actionCount[key] = n
             if (n >= 2 && tool !in setOf("scrollen", "warten", "schritt_erledigt", "notiz")) {
                 st.hint = TaskLogic.repeatHint(tool, n - 1)
-                if (n >= 4) { lastError = "Ich drehe mich im Kreis."; return Result.FAILED }
+                if (n >= 4) {
+                    if (complex && st.notes.isNotEmpty()) {
+                        finish(c, command, "Weiter bin ich nicht gekommen. Bisher habe ich: " + TaskLogic.fallbackAnswer(st), st, false, say)
+                        return Result.DONE
+                    }
+                    lastError = "Ich drehe mich im Kreis."; return Result.FAILED
+                }
                 continue
             }
 
@@ -211,8 +217,14 @@ Jetzt: $now.
                     }
                 }
                 "notiz" -> {
+                    val t = input.optString("text").take(300)
+                    val dup = st.notes.any { it.take(40).equals(t.take(40), ignoreCase = true) }
+                    if (dup) {
+                        st.hint = "Diese Info hast du schon notiert. Mach mit dem nächsten Punkt weiter (z. B. zurück und die nächste Mail öffnen)."
+                        continue
+                    }
                     actionsSinceAdvance++
-                    st.notes.add(input.optString("text").take(300))
+                    st.notes.add(t)
                     st.history.add("notiz gespeichert")
                 }
                 "plan_aendern" -> {
