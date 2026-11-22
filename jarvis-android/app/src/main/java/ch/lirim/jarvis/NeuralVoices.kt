@@ -143,6 +143,7 @@ object NeuralVoices {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track.play()
+        val fx = VoiceFx(Prefs.voiceFx(c), rate)
         try {
             engine.generateWithCallback(text, 0, speed.coerceIn(0.5f, 2f)) { samples ->
                 if (shouldStop()) return@generateWithCallback 0
@@ -151,6 +152,7 @@ object NeuralVoices {
                 while (off < samples.size) {
                     if (shouldStop()) return@generateWithCallback 0
                     val n = minOf(chunk, samples.size - off)
+                    fx.process(samples, off, n)
                     var sum = 0f
                     for (i in off until off + n) sum += samples[i] * samples[i]
                     level((sqrt(sum / n) * 4f).coerceIn(0f, 1f))

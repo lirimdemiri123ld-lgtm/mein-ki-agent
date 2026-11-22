@@ -89,9 +89,8 @@ Antworte NUR mit einer nummerierten Liste, ohne Einleitung."""
         if (s.screen.isNotBlank()) append("\nAktueller Bildschirm:\n").append(s.screen.take(2600)).append('\n')
         append(
             if (s.plan.isEmpty()) "\nWähle die nächste Aktion."
-            else "\nPrüfe zuerst am Bildschirm: Ist der aktuelle Schritt schon erledigt? Dann schritt_erledigt. " +
-                "Sonst wähle EIN Werkzeug für diesen Schritt. Stehen nötige Infos auf dem Bildschirm, halte sie mit notiz fest. " +
-                "Ist alles erledigt: fertig mit der Antwort an Lirim."
+            else "\nWähle EIN Werkzeug, das den aktuellen Schritt voranbringt. Stehen nötige Infos auf dem Bildschirm, halte sie mit notiz fest. " +
+                "Erst wenn der Bildschirm zeigt, dass der Schritt geschafft ist: schritt_erledigt. Ist alles erledigt: fertig mit der Antwort an Lirim."
         )
     }
 
@@ -102,7 +101,19 @@ Antworte NUR mit einer nummerierten Liste, ohne Einleitung."""
         .map { it.replace(Regex("""^\[\d+]\s*"""), "").replace(Regex("""@\d+,\d+"""), "") }
         .joinToString("\n").hashCode()
 
-    fun actionKey(name: String, args: Map<String, Any?>) = name + args.toSortedMap().toString()
+    fun actionKey(name: String, args: Map<String, Any?>, screen: String = "") =
+        name + args.toSortedMap().toString() + "#" + fingerprint(screen)
+
+    /** Darf «schritt_erledigt» akzeptiert werden? Nur wenn seit dem letzten Schritt wirklich etwas getan wurde. */
+    fun stepDoneAllowed(s: State, actionsSinceAdvance: Int): Boolean {
+        if (s.plan.isEmpty()) return true
+        val step = s.plan.getOrElse(s.current) { "" }.lowercase()
+        val reportingStep = listOf("mitteil", "sag", "antwort", "zusammenfass", "informier", "berichte").any { step.contains(it) }
+        return actionsSinceAdvance > 0 || reportingStep
+    }
+
+    fun stepDoneRejected(s: State) =
+        "Der Schritt «${s.plan.getOrElse(s.current) { "" }}» ist noch NICHT erledigt – du hast dafür noch nichts getan. Wähle jetzt ein passendes Werkzeug (z. B. tippen, text_eingeben, notiz)."
 
     /** Was tun, wenn das Modell mitten in einer Planaufgabe nur Text liefert? */
     fun textMeansFinish(s: State, text: String, textStreak: Int): Boolean {

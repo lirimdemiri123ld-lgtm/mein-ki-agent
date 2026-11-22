@@ -69,6 +69,10 @@ object Prefs {
     fun autoModel(c: Context): Boolean = p(c).getBoolean("auto_model", true)
     fun setAutoModel(c: Context, v: Boolean) = p(c).edit().putBoolean("auto_model", v).apply()
 
+    /** Klangfilter: "none", "jarvis", "kitt" */
+    fun voiceFx(c: Context): String = p(c).getString("voice_fx", "none") ?: "none"
+    fun setVoiceFx(c: Context, v: String) = p(c).edit().putString("voice_fx", v).apply()
+
     fun webSearch(c: Context): Boolean = p(c).getBoolean("web_search", true)
     fun setWebSearch(c: Context, v: Boolean) = p(c).edit().putBoolean("web_search", v).apply()
 }

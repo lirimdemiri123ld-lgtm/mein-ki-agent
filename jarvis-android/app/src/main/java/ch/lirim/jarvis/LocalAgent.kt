@@ -125,6 +125,7 @@ Jetzt: $now.
         var image: ByteArray? = null
         var imageFactor = 1f
         var textStreak = 0
+        var actionsSinceAdvance = 0
 
         for (step in 1..maxActions) {
             if (shouldStop()) return Result.STOPPED
@@ -165,7 +166,7 @@ Jetzt: $now.
             Agent.log("→ [${model.title.substringBefore(" ·").substringAfter("Gemma 4 ")}] $tool $input")
 
             // Schleifen-Schutz
-            val key = TaskLogic.actionKey(tool, args)
+            val key = TaskLogic.actionKey(tool, args, st.screen)
             val n = (actionCount[key] ?: 0) + 1
             actionCount[key] = n
             if (n >= 2 && tool !in setOf("scrollen", "warten", "schritt_erledigt", "notiz")) {
@@ -196,8 +197,13 @@ Jetzt: $now.
                         finish(c, command, TaskLogic.fallbackAnswer(st), st, complex, say)
                         return Result.DONE
                     }
+                    if (!TaskLogic.stepDoneAllowed(st, actionsSinceAdvance)) {
+                        st.hint = TaskLogic.stepDoneRejected(st)
+                        continue
+                    }
+                    actionsSinceAdvance = 0
                     val e = input.optString("ergebnis")
-                    if (e.isNotBlank()) st.notes.add(e)
+                    if (e.isNotBlank() && st.notes.none { it == e }) st.notes.add(e)
                     st.history.add("✓ Schritt ${st.current + 1} erledigt${if (e.isNotBlank()) ": $e" else ""}")
                     st.current++
                     if (plan.isNotEmpty() && st.current >= plan.size) {
@@ -205,6 +211,7 @@ Jetzt: $now.
                     }
                 }
                 "notiz" -> {
+                    actionsSinceAdvance++
                     st.notes.add(input.optString("text").take(300))
                     st.history.add("notiz gespeichert")
                 }
@@ -227,6 +234,7 @@ Jetzt: $now.
                     }
                 }
                 "tippen_bild" -> {
+                    actionsSinceAdvance++
                     val svc = JarvisService.instance
                     val ok = svc?.tapXY(input.optDouble("x").toFloat() * imageFactor, input.optDouble("y").toFloat() * imageFactor) ?: false
                     Thread.sleep(900)
@@ -234,6 +242,7 @@ Jetzt: $now.
                     st.history.add("$step. tippen_bild $input → ${if (ok) "getippt" else "fehlgeschlagen"}")
                 }
                 else -> {
+                    actionsSinceAdvance++
                     val out = Tools.execute(c, tool, input)
                     val idx = out.text.indexOf("Aktueller Bildschirm:")
                     val result: String

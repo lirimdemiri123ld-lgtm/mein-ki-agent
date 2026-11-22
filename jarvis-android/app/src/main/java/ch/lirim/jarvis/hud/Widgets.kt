@@ -213,3 +213,32 @@ class TypewriterLog(private val tv: TextView, private val onChange: () -> Unit) 
         h.postDelayed({ tick() }, 12)
     }
 }
+
+/** Rotes Lauflicht (Hommage an Auto-Computer der 80er) – pulsiert beim Sprechen. */
+class KittScanner(c: Context) : View(c) {
+    var level = 0f
+    private var t = 0f
+    private var smooth = 0f
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    override fun onDraw(c: Canvas) {
+        t += 0.016f
+        smooth = Hud.ease(smooth, level, 0.3f)
+        val n = 16
+        val gap = width * 0.01f
+        val w = (width - gap * (n - 1)) / n
+        val pos = ((sin(t * 2.6f) + 1f) / 2f) * (n - 1)
+        for (i in 0 until n) {
+            val d = kotlin.math.abs(i - pos)
+            var a = (1f - d / 4f).coerceIn(0f, 1f)
+            if (smooth > 0.05f) {
+                val centre = kotlin.math.abs(i - (n - 1) / 2f) / ((n - 1) / 2f)
+                a = maxOf(a, (smooth * 1.4f - centre).coerceIn(0f, 1f))
+            }
+            p.color = android.graphics.Color.argb((40 + 215 * a).toInt(), 255, (30 + 40 * a).toInt(), 20)
+            val x = i * (w + gap)
+            c.drawRect(x, 0f, x + w, height.toFloat(), p)
+        }
+        postInvalidateOnAnimation()
+    }
+}

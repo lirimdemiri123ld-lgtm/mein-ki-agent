@@ -55,6 +55,7 @@ class MainActivity : Activity() {
 
     // HUD-Elemente
     private lateinit var reactor: ArcReactorView
+    private lateinit var kitt: ch.lirim.jarvis.hud.KittScanner
     private lateinit var transcript: TextView
     private lateinit var clock: TextView
     private lateinit var dateView: TextView
@@ -269,6 +270,10 @@ class MainActivity : Activity() {
         reactor.setOnClickListener { if (listening) stopListening() else listen() }
         reactor.setOnLongClickListener { Agent.stop(); Speaker.stop(); stopListening(); true }
         col.addView(reactor, LinearLayout.LayoutParams(-1, dp(300)).apply { topMargin = dp(6) })
+        kitt = ch.lirim.jarvis.hud.KittScanner(this).apply {
+            visibility = if (Prefs.voiceFx(this@MainActivity) == "kitt") android.view.View.VISIBLE else android.view.View.GONE
+        }
+        col.addView(kitt, LinearLayout.LayoutParams(-1, dp(18)).apply { topMargin = dp(4); leftMargin = dp(40); rightMargin = dp(40) })
 
         transcript = hudText(15f, Hud.ICE).apply {
             gravity = Gravity.CENTER
@@ -383,6 +388,7 @@ class MainActivity : Activity() {
                 else -> ArcReactorView.State.IDLE
             }
             reactor.level = if (listening) micLevel else Speaker.level
+            kitt.level = if (Speaker.speaking) Speaker.level else 0f
             reactor.subLabel = when (reactor.state) {
                 ArcReactorView.State.LISTENING -> "Ich höre"
                 ArcReactorView.State.SPEAKING -> "Spreche"
@@ -665,8 +671,21 @@ class MainActivity : Activity() {
     private fun voiceMenu() {
         AlertDialog.Builder(this)
             .setTitle("Stimme")
-            .setItems(arrayOf("🧠 Neuronale Stimmen (empfohlen, offline)", "🔈 Systemstimme: Stil, Tonhöhe, Tempo")) { _, i ->
-                if (i == 0) NeuralVoiceDialog.show(this) else VoiceDialog.show(this)
+            .setItems(arrayOf(
+                "★ Jarvis-Stil-Paket (ruhig, Raumhall, «KI im Anzug»)",
+                "★ KITT-Stil-Paket (tief, metallisch, Auto-Computer)",
+                "🧠 Neuronale Stimme selbst wählen",
+                "🔈 Systemstimme: Stil, Tonhöhe, Tempo",
+                "✕ Klangfilter aus"
+            )) { _, i ->
+                when (i) {
+                    0 -> NeuralVoiceDialog.applyPack(this, "jarvis")
+                    1 -> NeuralVoiceDialog.applyPack(this, "kitt")
+                    2 -> NeuralVoiceDialog.show(this)
+                    3 -> VoiceDialog.show(this)
+                    4 -> { Prefs.setVoiceFx(this, "none"); Speaker.say("Klangfilter aus.") }
+                }
+                main.postDelayed({ kitt.visibility = if (Prefs.voiceFx(this) == "kitt") android.view.View.VISIBLE else android.view.View.GONE }, 300)
             }
             .show()
     }

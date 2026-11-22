@@ -42,6 +42,36 @@ object NeuralVoiceDialog {
             .show()
     }
 
+    /** Fertige Stil-Pakete: Stimme + Klangfilter + Tempo in einem Schritt. */
+    fun applyPack(a: Activity, pack: String) {
+        val cat = NeuralVoices.catalog(a)
+        val prefs = when (pack) {
+            "jarvis" -> listOf("de_DE-thorsten-high", "de_DE-thorsten-medium", "de_DE-karlsson")
+            "kitt" -> listOf("de_DE-karlsson", "de_DE-thorsten-medium", "de_DE-thorsten-high")
+            else -> emptyList()
+        }
+        val v = prefs.firstNotNullOfOrNull { p -> cat.firstOrNull { it.id.contains(p) } }
+        if (v == null) { Toast.makeText(a, "Passende Stimme nicht im Katalog.", Toast.LENGTH_LONG).show(); return }
+        Prefs.setVoiceFx(a, pack)
+        val (pitch, rate) = if (pack == "kitt") 1.0f to 0.95f else 1.0f to 0.97f
+        Prefs.setVoice(a, Prefs.voiceName(a), pitch, rate, Prefs.voiceStyle(a))
+        if (NeuralVoices.isInstalled(a, v.id)) {
+            Prefs.setNeuralVoice(a, v.id)
+            Speaker.say(packSample(pack))
+        } else {
+            AlertDialog.Builder(a)
+                .setTitle(if (pack == "kitt") "KITT-Stil-Paket" else "Jarvis-Stil-Paket")
+                .setMessage("Dafür lade ich die Stimme «${v.title.substringBefore(" –")}» (ca. ${v.mb()} MB). Am besten im WLAN.")
+                .setPositiveButton("Herunterladen") { _, _ -> download(a, v, packSample(pack)) }
+                .setNegativeButton("Abbrechen", null)
+                .show()
+        }
+    }
+
+    private fun packSample(pack: String) = if (pack == "kitt")
+        "Hallo Lirim. Alle Systeme laufen innerhalb der Toleranz. Wohin fahren wir heute?"
+    else "Guten Tag, Lirim. Alle Systeme sind online. Womit darf ich behilflich sein?"
+
     private fun NeuralVoices.VoiceInfo.mb() = if (sizeMb > 0) sizeMb.toString() else "?"
 
     private fun choose(a: Activity, v: NeuralVoices.VoiceInfo) {
@@ -69,12 +99,12 @@ object NeuralVoiceDialog {
         AlertDialog.Builder(a)
             .setTitle(v.title)
             .setMessage("Diese Stimme herunterladen (ca. ${v.mb()} MB)? Am besten im WLAN.")
-            .setPositiveButton("Herunterladen") { _, _ -> download(a, v) }
+            .setPositiveButton("Herunterladen") { _, _ -> download(a, v, sample(v)) }
             .setNegativeButton("Abbrechen", null)
             .show()
     }
 
-    private fun download(a: Activity, v: NeuralVoices.VoiceInfo) {
+    private fun download(a: Activity, v: NeuralVoices.VoiceInfo, sampleText: String) {
         val dp = a.resources.displayMetrics.density
         val box = LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL
@@ -96,7 +126,7 @@ object NeuralVoiceDialog {
                 a.runOnUiThread {
                     dlg.dismiss()
                     Prefs.setNeuralVoice(a, v.id)
-                    Speaker.say(sample(v))
+                    Speaker.say(sampleText)
                     Toast.makeText(a, "Stimme installiert und aktiv", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {

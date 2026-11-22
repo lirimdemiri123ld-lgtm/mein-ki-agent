@@ -13,6 +13,8 @@ val screens = mapOf(
     "wa_chat_ali" to "App im Vordergrund: WhatsApp (com.whatsapp)\n[1] TextView \"Ali Bellikaya\"\n[2] TextView \"Ok bis morgen\"\n[3] EditText {Hinweis: Nachricht} [klickbar, Eingabefeld]\n[4] ImageButton (Sprachnachricht) [klickbar]",
     "wa_chat_ali_typed" to "App im Vordergrund: WhatsApp (com.whatsapp)\n[1] TextView \"Ali Bellikaya\"\n[2] TextView \"Ok bis morgen\"\n[3] EditText \"%TEXT%\" [klickbar, Eingabefeld]\n[4] ImageButton (Senden) [klickbar]",
     "wa_chat_ali_sent" to "App im Vordergrund: WhatsApp (com.whatsapp)\n[1] TextView \"Ali Bellikaya\"\n[2] TextView \"Ok bis morgen\"\n[3] TextView \"%TEXT%\" (gesendet)\n[4] EditText {Hinweis: Nachricht} [klickbar, Eingabefeld]",
+    "ol_mail_seb" to "App im Vordergrund: Outlook (com.microsoft.office.outlook)\n[1] ImageButton (Zurück) [klickbar]\n[2] TextView \"Audit Regensdorf verschoben auf Donnerstag 9 Uhr\"\n[3] TextView \"Von: Sebastian Lorenzen\"\n[4] TextView \"Hallo Lirim, das Audit in Regensdorf wird auf Donnerstag 9 Uhr verschoben. Bitte bring die Auswertung der Kundenreklamationen mit. Gruss Sebastian\"",
+    "ol_mail_ing" to "App im Vordergrund: Outlook (com.microsoft.office.outlook)\n[1] ImageButton (Zurück) [klickbar]\n[2] TextView \"Perfect Order Rate KW 47: 97,8 %\"\n[3] TextView \"Von: Ingmar Gehlen\"\n[4] TextView \"Hoi Lirim, die POR in KW 47 liegt bei 97,8 %. Hauptursache der Fehler: falsche Taschen in Cold Full. Lg Ingmar\"",
     "ol_inbox" to "App im Vordergrund: Outlook (com.microsoft.office.outlook)\n[1] TextView \"Posteingang\"\n[2] View \"Sebastian Lorenzen – Audit Regensdorf verschoben auf Donnerstag 9 Uhr\" (ungelesen) [klickbar]\n[3] View \"Ingmar Gehlen – Perfect Order Rate KW 47: 97,8 %\" (ungelesen) [klickbar]\n[4] View \"Newsletter Migros – Weihnachtsangebote\" [klickbar]\n[5] Button \"Filter\" [klickbar]",
 )
 
@@ -33,6 +35,9 @@ class Sim {
                 when {
                     screen == "wa_list" && id == 3 -> { screen = "wa_chat_ali"; "Auf [3] getippt." }
                     screen == "wa_chat_ali_typed" && id == 4 -> { screen = "wa_chat_ali_sent"; sent = true; "Auf [4] getippt." }
+                    screen == "ol_inbox" && id == 2 -> { screen = "ol_mail_seb"; "Auf [2] getippt." }
+                    screen == "ol_inbox" && id == 3 -> { screen = "ol_mail_ing"; "Auf [3] getippt." }
+                    screen.startsWith("ol_mail") && id == 1 -> { screen = "ol_inbox"; "Auf [1] getippt." }
                     else -> "Auf [$id] getippt."
                 }
             }
@@ -43,7 +48,8 @@ class Sim {
             }
             "bestaetigen" -> "Lirim hat JA getippt. Du darfst fortfahren."
             "bildschirm_lesen" -> "ok"
-            "taste" -> { if (s.contains("zurueck") && screen.startsWith("wa_chat")) screen = "wa_list"; "Taste gedrückt." }
+            "taste" -> { if (s.contains("zurueck") && screen.startsWith("wa_chat")) screen = "wa_list"
+                if (s.contains("zurueck") && screen.startsWith("ol_mail")) screen = "ol_inbox"; "Taste gedrückt." }
             else -> "ok"
         }
     }
@@ -104,6 +110,7 @@ Hintergrundwissen über Lirim:
                 val st = TaskLogic.State(cmd, plan, screen = sim.show())
                 var result = "ABBRUCH"
                 var textStreak = 0
+                var since = 0
                 val counts = HashMap<String, Int>()
                 for (step in 1..25) {
                     val m = e.createConversation(ConversationConfig(systemInstruction = Contents.of(system), tools = tools,
@@ -118,18 +125,20 @@ Hintergrundwissen über Lirim:
                     }
                     textStreak = 0
                     println("  $step. $name $a")
-                    val key = TaskLogic.actionKey(name!!, a); val n = (counts[key] ?: 0) + 1; counts[key] = n
+                    val key = TaskLogic.actionKey(name!!, a, st.screen); val n = (counts[key] ?: 0) + 1; counts[key] = n
                     if (n >= 2 && name !in setOf("scrollen", "warten", "schritt_erledigt", "notiz")) {
                         st.hint = TaskLogic.repeatHint(name!!, n - 1); if (n >= 4) { result = "KREIS"; break }; continue
                     }
                     when (name) {
                         "fertig" -> { result = "FERTIG: ${a["nachricht"]}"; break }
-                        "schritt_erledigt" -> { if (st.current >= plan.size) { result = "FERTIG(auto): " + TaskLogic.fallbackAnswer(st); break }; a["ergebnis"]?.toString()?.takeIf { it.isNotBlank() }?.let { st.notes.add(it) }; st.current++; st.history.add("✓ Schritt erledigt")
+                        "schritt_erledigt" -> { if (st.current >= plan.size) { result = "FERTIG(auto): " + TaskLogic.fallbackAnswer(st); break }
+                            if (!TaskLogic.stepDoneAllowed(st, since)) { st.hint = TaskLogic.stepDoneRejected(st); println("     ↳ abgelehnt (noch nichts getan)"); continue }
+                            since = 0; a["ergebnis"]?.toString()?.takeIf { it.isNotBlank() }?.let { st.notes.add(it) }; st.current++; st.history.add("✓ Schritt erledigt")
                             if (st.current >= plan.size) st.hint = "Alle Planschritte sind erledigt. Rufe jetzt fertig mit einer Zusammenfassung auf." }
-                        "notiz" -> { st.notes.add(a["text"].toString()); st.history.add("notiz gespeichert") }
+                        "notiz" -> { since++; st.notes.add(a["text"].toString()); st.history.add("notiz gespeichert") }
                         "plan_aendern" -> { val neu = a["schritte"].toString().split(";").map { it.trim() }.filter { it.length > 2 }
                             while (plan.size > st.current) plan.removeAt(plan.size - 1); plan.addAll(neu) }
-                        else -> { val before = TaskLogic.fingerprint(st.screen); val r = sim.exec(name!!, a); st.screen = sim.show()
+                        else -> { since++; val before = TaskLogic.fingerprint(st.screen); val r = sim.exec(name!!, a); st.screen = sim.show()
                             if (TaskLogic.fingerprint(st.screen) == before && name in setOf("tippen", "text_eingeben")) st.hint = "Deine letzte Aktion hat am Bildschirm nichts verändert."
                             st.history.add("$step. $name $a → $r") }
                     }
