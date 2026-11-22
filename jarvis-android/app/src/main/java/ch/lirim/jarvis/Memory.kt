@@ -281,7 +281,7 @@ object Memory {
         }
         if (history.isNotEmpty()) {
             sb.append("\n## Letzte Aufträge\n")
-            history.takeLast(8).forEach { (wc, r) -> sb.append("- ").append(wc).append(" → ").append(r).append('\n') }
+            history.takeLast(4).forEach { (wc, r) -> sb.append("- ").append(wc).append(" → ").append(r).append('\n') }
         }
         return sb.toString()
     }

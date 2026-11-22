@@ -24,9 +24,9 @@ object BrainDialog {
         box.addView(TextView(a).apply { text = "Denkmodus"; textSize = 15f })
         val group = RadioGroup(a)
         val modes = listOf(
-            "hybrid" to "Hybrid – lokal zuerst, Claude nur nach Rückfrage (empfohlen)",
-            "local" to "Nur lokal – nie Guthaben, offline",
-            "cloud" to "Nur Claude – am schlausten, kostet Guthaben"
+            "hybrid" to "Spar-Hybrid – Gelerntes & Plaudern gratis, neue App-Aufgaben mit Claude Haiku (empfohlen)",
+            "local" to "Nur lokal – nie Guthaben, offline (langsam)",
+            "cloud" to "Nur Claude – auch Plaudern über Claude"
         )
         modes.forEachIndexed { i, (key, label) ->
             group.addView(RadioButton(a).apply {
@@ -40,6 +40,25 @@ object BrainDialog {
             text = "Jarvis wählt das Modell selbst (einfach → schnell, komplex → schlau)"
             isChecked = Prefs.autoModel(a)
             setOnCheckedChangeListener { _, v -> Prefs.setAutoModel(a, v) }
+        })
+        // Spar-Übersicht
+        val recipes = RecipeStore.count(a)
+        box.addView(TextView(a).apply {
+            text = "\nSpar-Übersicht diesen Monat\n" +
+                "Claude-Kosten: ≈ ${Agent.rp(Prefs.monthCost(a))}\n" +
+                "Gratis erledigt (ohne Claude): ${Prefs.savedTasks(a)}\n" +
+                "Gelernte Abläufe: $recipes – die spielt Jarvis selbst ab"
+            textSize = 14f
+        })
+        if (recipes > 0) box.addView(Button(a).apply {
+            isAllCaps = false; text = "Gelernte Abläufe ansehen"
+            setOnClickListener {
+                val all = RecipeStore.all(a).sortedByDescending { it.successes }
+                val labels = all.map { "«${it.template}» · ${it.successes}× ok" }.toTypedArray()
+                AlertDialog.Builder(a).setTitle("Gelernte Abläufe (tippen = löschen)")
+                    .setItems(labels) { _, i -> RecipeStore.delete(a, all[i].template) }
+                    .setNegativeButton("Schliessen", null).show()
+            }
         })
         box.addView(TextView(a).apply {
             text = "\nLokale Gehirne (werden in den Handyspeicher geladen)\nGelernte Fähigkeiten: ${Memory.skillCount(a)}"; textSize = 15f

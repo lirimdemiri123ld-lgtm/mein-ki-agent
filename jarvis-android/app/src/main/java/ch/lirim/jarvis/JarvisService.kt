@@ -24,7 +24,7 @@ class JarvisService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: JarvisService? = null
-        private const val MAX_NODES = 300
+        private const val MAX_NODES = 160
     }
 
     var overlay: Overlay? = null
@@ -116,21 +116,22 @@ class JarvisService : AccessibilityService() {
             nodes[id] = n
             val r = Rect()
             n.getBoundsInScreen(r)
-            val cls = n.className?.toString()?.substringAfterLast('.') ?: "View"
-            sb.append('[').append(id).append("] ").append(cls)
-            if (text.isNotEmpty()) sb.append(" \"").append(text.take(120)).append('"')
-            if (desc.isNotEmpty() && desc != text) sb.append(" (").append(desc.take(100)).append(')')
-            if (hint.isNotEmpty() && hint != text) sb.append(" {Hinweis: ").append(hint.take(60)).append('}')
+            // Kompakt (spart Tokens): Klassenname nur bei Eingabefeldern, Koordinaten nur ohne Text
+            sb.append('[').append(id).append(']')
+            if (n.isEditable) sb.append(" Eingabe")
+            if (text.isNotEmpty()) sb.append(" \"").append(text.take(80)).append('"')
+            if (desc.isNotEmpty() && desc != text) sb.append(" (").append(desc.take(60)).append(')')
+            if (hint.isNotEmpty() && hint != text) sb.append(" {").append(hint.take(40)).append('}')
             val flags = mutableListOf<String>()
-            if (n.isClickable) flags.add("klickbar")
-            if (n.isEditable) flags.add("Eingabefeld")
-            if (n.isScrollable) flags.add("scrollbar")
+            if (n.isClickable && !n.isEditable) flags.add("k")
+            if (n.isScrollable) flags.add("scroll")
             if (n.isCheckable) flags.add(if (n.isChecked) "AN" else "AUS")
-            if (n.isSelected) flags.add("ausgewählt")
-            if (n.isFocused) flags.add("fokussiert")
-            if (!n.isEnabled) flags.add("deaktiviert")
-            if (flags.isNotEmpty()) sb.append(" [").append(flags.joinToString(", ")).append(']')
-            sb.append(" @").append(r.centerX()).append(',').append(r.centerY()).append('\n')
+            if (n.isSelected) flags.add("gewählt")
+            if (n.isFocused) flags.add("fokus")
+            if (!n.isEnabled) flags.add("aus")
+            if (flags.isNotEmpty()) sb.append(" ").append(flags.joinToString(","))
+            if (text.isEmpty() && desc.isEmpty()) sb.append(" @").append(r.centerX()).append(',').append(r.centerY())
+            sb.append('\n')
         }
         for (i in 0 until n.childCount) {
             val c = n.getChild(i) ?: continue
@@ -139,6 +140,30 @@ class JarvisService : AccessibilityService() {
     }
 
     private fun node(id: Int): AccessibilityNodeInfo? = synchronized(nodes) { nodes[id] }
+
+    /** Sichtbarer Text eines Elements (für das Lernen von Abläufen). */
+    fun labelOf(id: Int): String? {
+        val n = node(id) ?: return null
+        val t = n.text?.toString()?.trim().orEmpty()
+        if (t.isNotEmpty() && !n.isEditable) return t
+        val d = n.contentDescription?.toString()?.trim().orEmpty()
+        if (d.isNotEmpty()) return d
+        // Klickbarer Container ohne Text: ersten Text eines Kindes nehmen
+        for (i in 0 until n.childCount) {
+            val c = n.getChild(i) ?: continue
+            val ct = c.text?.toString()?.trim().orEmpty().ifEmpty { c.contentDescription?.toString()?.trim().orEmpty() }
+            if (ct.isNotEmpty()) return ct
+        }
+        return null
+    }
+
+    /** Text in das passende Eingabefeld schreiben (für abgespielte Abläufe). */
+    fun typeAny(text: String, submit: Boolean): String {
+        if (findFocus(AccessibilityNodeInfo.FOCUS_INPUT) != null) return typeText(null, text, submit)
+        readScreen()
+        val edit = synchronized(nodes) { nodes.entries.sortedBy { it.key }.firstOrNull { it.value.isEditable }?.key }
+        return typeText(edit, text, submit)
+    }
 
     // ---------------------------------------------------------------- Aktionen
 

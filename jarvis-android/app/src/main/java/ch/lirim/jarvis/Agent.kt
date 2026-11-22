@@ -3,6 +3,10 @@ package ch.lirim.jarvis
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import ch.lirim.jarvis.core.People
+import ch.lirim.jarvis.core.QuickIntents
+import ch.lirim.jarvis.core.Recipes
+import ch.lirim.jarvis.core.TaskLogic
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -11,7 +15,7 @@ import java.util.Locale
 
 /** Das "Gehirn": Schleife aus Claude-Antwort → Werkzeug ausführen → Ergebnis zurück. */
 object Agent {
-    private const val MAX_STEPS = 40
+    private const val MAX_STEPS = 25
     private const val CONVERSATION_TIMEOUT_MS = 10 * 60 * 1000L
 
     @Volatile var running = false
@@ -43,6 +47,8 @@ object Agent {
         if (running) return
         messages = JSONArray()
         pendingResults = null
+        awaitingAnswer = false
+        lastExchange = null
         LocalAgent.reset()
         log("— Neues Gespräch —")
     }
@@ -60,15 +66,10 @@ object Agent {
         }
         val app = ctx.applicationContext
         if (System.currentTimeMillis() - lastActivity > CONVERSATION_TIMEOUT_MS) {
+            awaitingAnswer = false
             messages = JSONArray()
             pendingResults = null
         }
-        val content = JSONArray()
-        pendingResults?.let { pr -> for (i in 0 until pr.length()) content.put(pr.get(i)) }
-        pendingResults = null
-        content.put(JSONObject().put("type", "text").put("text", command))
-        messages.put(JSONObject().put("role", "user").put("content", content))
-
         log("Du: $command")
         currentCommand = command
         running = true
@@ -81,6 +82,7 @@ object Agent {
                 Speaker.say("Es gab einen Fehler.")
                 messages = JSONArray()
                 pendingResults = null
+                awaitingAnswer = false
             } finally {
                 running = false
                 lastActivity = System.currentTimeMillis()
@@ -90,69 +92,237 @@ object Agent {
         }.start()
     }
 
-    /** Hybrid-Weiche: lokal zuerst, Claude nur wenn nötig (und erlaubt). */
+    // ------------------------------------------------------------------ Weiche
+
+    /**
+     * Spar-Weiche:
+     *  1. Einfache Befehle (Wecker, Timer, Anrufen, App öffnen) → ohne KI, gratis
+     *  2. Gelernte Abläufe → selbst abspielen, gratis
+     *  3. Plaudern/Fragen → lokales Gehirn, gratis
+     *  4. Neue Aufgaben in Apps → Claude Haiku (sparsam), danach wird der Ablauf gelernt
+     */
     private fun route(ctx: Context, command: String) {
         val mode = Prefs.brain(ctx)
         val lc = command.lowercase()
         val forceCloud = lc.startsWith("claude") || lc.contains("mit claude")
         val hasKey = Prefs.apiKey(ctx).isNotBlank()
+        val cloudOk = hasKey && mode != "local" && System.currentTimeMillis() >= Prefs.cloudBlockedUntil(ctx)
 
-        val cloudOk = hasKey && System.currentTimeMillis() >= Prefs.cloudBlockedUntil(ctx)
-        if ((mode == "cloud" || forceCloud) && hasKey) { cloud(ctx); return }
+        // Antwort auf eine Rückfrage von Claude → im selben Gespräch weiter
+        if (awaitingAnswer && cloudOk) {
+            awaitingAnswer = false
+            cloudContinue(ctx, command)
+            return
+        }
+        awaitingAnswer = false
+        messages = JSONArray(); pendingResults = null
+        var prefix: List<Recipes.Step> = emptyList()
+
+        if (!forceCloud) {
+            if (quick(ctx, command)) { Prefs.addSaved(ctx); return }
+            when (replay(ctx, command, cloudOk)) {
+                Replay.DONE -> { Prefs.addSaved(ctx); return }
+                Replay.STOPPED -> return
+                Replay.PARTIAL -> {
+                    prefix = replayDone
+                    if (cloudOk) { cloudFresh(ctx, command, prefix); return }
+                }
+                Replay.NONE -> {}
+            }
+        }
+
+        val chat = TaskLogic.isChatOnly(command)
+        if (cloudOk && (forceCloud || mode == "cloud" || !chat)) { cloudFresh(ctx, command, prefix); return }
+        if ((forceCloud || mode == "cloud") && !hasKey) {
+            say("Bitte trag zuerst deinen API-Schlüssel in den Einstellungen ein."); return
+        }
 
         if (LocalBrain.available(ctx)) {
-            // Cloud-Verlauf nicht mit lokalem Auftrag vermischen
-            messages = JSONArray(); pendingResults = null
-            val hybrid = mode == "hybrid" && hasKey
+            val hybrid = mode == "hybrid" && cloudOk
             val r = LocalAgent.run(ctx, command, hybrid, { stopRequested }) { say(it) }
-            if (r == LocalAgent.Result.DONE) Memory.addHistory(ctx, command, "(lokal erledigt)")
             when (r) {
-                LocalAgent.Result.ESCALATE, LocalAgent.Result.FAILED -> {
-                    if (!hybrid) {
-                        if (r == LocalAgent.Result.FAILED) say("Mein lokales Gehirn hatte ein Problem: ${LocalAgent.lastError.take(120)}")
-                        return
-                    }
-                    if (System.currentTimeMillis() < Prefs.cloudBlockedUntil(ctx)) {
-                        if (r == LocalAgent.Result.FAILED) say("Mein lokales Gehirn hatte ein Problem: ${LocalAgent.lastError.take(120)}")
-                        else say("Das schaffe ich lokal nicht, und dein Claude-Guthaben ist leer.")
-                        return
-                    }
-                    if (askCloud()) {
-                        messages = JSONArray()
-                        messages.put(JSONObject().put("role", "user").put("content", command))
-                        cloud(ctx)
-                    } else say("In Ordnung, dann lasse ich es.")
-                }
+                LocalAgent.Result.DONE -> { Memory.addHistory(ctx, command, "(lokal erledigt)"); Prefs.addSaved(ctx) }
                 LocalAgent.Result.STOPPED -> log("⏹ Gestoppt.")
-                else -> {}
+                else -> {
+                    if (cloudOk) { log("Lokal nicht lösbar – Claude übernimmt."); cloudFresh(ctx, command, emptyList()) }
+                    else if (r == LocalAgent.Result.FAILED) say("Mein lokales Gehirn hatte ein Problem: ${LocalAgent.lastError.take(120)}")
+                    else say(if (hasKey) "Das schaffe ich lokal nicht, und dein Claude-Guthaben ist leer." else "Das schaffe ich lokal nicht.")
+                }
             }
             return
         }
-        if (cloudOk && mode != "local") { cloud(ctx); return }
+        if (cloudOk) { cloudFresh(ctx, command, prefix); return }
         val dl = LocalBrain.models.map { LocalBrain.progress(ctx, it) }.firstOrNull { it in 0..99 }
         if (dl != null) { say("Mein lokales Gehirn lädt noch, $dl Prozent. Gleich bin ich bereit."); return }
-        say("Ich habe noch kein lokales Gehirn. Tippe auf GEHIRN und lade ein Modell in deinen Handyspeicher.")
-        messages = JSONArray(); pendingResults = null
+        say(if (!hasKey) "Für diese Aufgabe brauche ich Claude. Trag unter SYSTEM deinen API-Schlüssel ein."
+            else "Dein Claude-Guthaben ist leer. Für Plaudern kannst du unter GEHIRN ein lokales Modell laden.")
     }
 
-    private fun askCloud(): Boolean {
-        val q = "Das ist für mein lokales Gehirn zu schwierig. Soll ich Claude nutzen? Das kostet etwas Guthaben."
-        val ov = JarvisService.instance?.overlay
-        if (ov == null) { say(q + " Sag dann einfach «mit Claude» vor deinem Auftrag."); return false }
-        Speaker.say(q)
-        log("❓ $q")
-        return ov.confirm("Claude nutzen? (kostet Guthaben)")
+    // ------------------------------------------------------------------ 1. Ohne KI
+
+    private fun quick(ctx: Context, command: String): Boolean {
+        val i = QuickIntents.parse(command) ?: return false
+        log("⚡ Direkt erledigt (ohne KI)")
+        when (i) {
+            is QuickIntents.Intent.Alarm -> {
+                Tools.execute(ctx, "wecker_stellen", JSONObject().put("stunde", i.hour).put("minute", i.minute))
+                say("Wecker auf ${i.hour}:${"%02d".format(i.minute)} gestellt.")
+            }
+            is QuickIntents.Intent.Timer -> {
+                Tools.execute(ctx, "timer_stellen", JSONObject().put("sekunden", i.seconds))
+                val m = i.seconds / 60; val s = i.seconds % 60
+                say("Timer läuft: " + listOfNotNull(if (m > 0) "$m Minuten" else null, if (s > 0) "$s Sekunden" else null).joinToString(" und ") + ".")
+            }
+            is QuickIntents.Intent.Call -> {
+                val who = People.resolve(i.who, Memory.factTexts(ctx))
+                    ?: if (People.isRelational(i.who)) return false else i.who
+                val out = Tools.execute(ctx, "anrufen", JSONObject().put("wen", who)).text.substringBefore("\n\nAktueller Bildschirm").trim()
+                say(out)
+            }
+            is QuickIntents.Intent.OpenApp -> {
+                val out = Tools.execute(ctx, "app_oeffnen", JSONObject().put("name", i.app)).text.substringBefore("\n\nAktueller Bildschirm").trim()
+                if (!out.contains("geöffnet")) return false.also { log(out) }
+                say(Regex("""App (.+?) geöffnet""").find(out)?.groupValues?.get(1)?.let { "$it ist offen." } ?: "Erledigt.")
+            }
+        }
+        Memory.addHistory(ctx, command, "(direkt erledigt)")
+        return true
+    }
+
+    // ------------------------------------------------------------------ 2. Gelernte Abläufe
+
+    private enum class Replay { NONE, DONE, PARTIAL, STOPPED }
+    private var replayDone: List<Recipes.Step> = emptyList()
+
+    private fun replay(ctx: Context, command: String, cloudOk: Boolean): Replay {
+        val (r, b0) = RecipeStore.find(ctx, command) ?: return Replay.NONE
+        val svc = JarvisService.instance ?: return Replay.NONE
+        val facts = Memory.factTexts(ctx)
+        val b = b0.mapValues { (_, v) -> if (People.isRelational(v)) People.resolve(v, facts) ?: v else v }
+        val steps = Recipes.instantiate(r, b)
+        log("📚 Gelernter Ablauf (${r.successes}× geklappt) – ohne Claude")
+        val done = mutableListOf<Recipes.Step>()
+        replayDone = emptyList()
+        for ((i, s0) in steps.withIndex()) {
+            if (stopRequested) { log("⏹ Gestoppt."); return Replay.STOPPED }
+            status("gelernt · Schritt ${i + 1}/${steps.size}")
+            var s = s0
+            if (s.args["text"] == Recipes.GEN) {
+                val t = compose(ctx, command, s.args["beispiel_auftrag"].orEmpty(), s.args["beispiel"].orEmpty(), cloudOk)
+                if (t.isNullOrBlank()) { replayDone = done; RecipeStore.result(ctx, r.template, false); return Replay.PARTIAL }
+                s = Recipes.Step(s.tool, s.args.filterKeys { !it.startsWith("beispiel") } + ("text" to t))
+            }
+            log("↻ ${s.tool} ${s.args.filterKeys { !it.startsWith("beispiel") }}")
+            when (runStep(ctx, svc, s)) {
+                true -> done.add(s)
+                null -> { say("In Ordnung, dann lasse ich es."); return Replay.STOPPED }
+                false -> {
+                    log("Gelernter Ablauf hakt bei Schritt ${i + 1} – Claude übernimmt.")
+                    RecipeStore.result(ctx, r.template, false)
+                    replayDone = done
+                    return Replay.PARTIAL
+                }
+            }
+        }
+        RecipeStore.result(ctx, r.template, true)
+        val answer = Recipes.fill(r.answer, b)
+        Memory.addHistory(ctx, command, answer)
+        say(answer)
+        return Replay.DONE
+    }
+
+    /** Führt einen gelernten Schritt aus. true = ok, false = hakt, null = Lirim hat Nein gesagt. */
+    private fun runStep(ctx: Context, svc: JarvisService, s: Recipes.Step): Boolean? {
+        val a = s.args
+        fun bad(t: String) = t.startsWith("Fehler") || t.contains("fehlgeschlagen", true) ||
+            t.contains("Kein Element", true) || t.contains("nicht gefunden", true) || t.contains("nicht möglich", true)
+        return when (s.tool) {
+            "tippen" -> {
+                val q = a["text"].orEmpty()
+                var out = svc.tapText(q)
+                if (bad(out)) { Thread.sleep(1500); svc.readScreen(); out = svc.tapText(q) }
+                Thread.sleep(900)
+                !bad(out)
+            }
+            "text_eingeben" -> {
+                val out = svc.typeAny(a["text"].orEmpty(), a["absenden"] == "true")
+                Thread.sleep(500)
+                out.startsWith("Text eingegeben")
+            }
+            "bestaetigen", "anrufen" -> {
+                val out = Tools.execute(ctx, s.tool, toJson(a)).text
+                if (out.contains("NEIN")) null else !bad(out)
+            }
+            else -> !bad(Tools.execute(ctx, s.tool, toJson(a)).text)
+        }
+    }
+
+    private fun toJson(a: Map<String, String>): JSONObject {
+        val o = JSONObject()
+        for ((k, v) in a) {
+            if (k.startsWith("beispiel")) continue
+            o.put(k, v.toIntOrNull() ?: v.toBooleanStrictOrNull() ?: v)
+        }
+        return o
+    }
+
+    /** Neuen Text (z. B. Nachricht) nach gelerntem Muster formulieren – winziger, sehr günstiger Aufruf. */
+    private fun compose(ctx: Context, command: String, exCmd: String, exText: String, cloudOk: Boolean): String? {
+        val prompt = "Früherer Auftrag: «$exCmd»\nDamals eingetippter Text: «$exText»\n\nNeuer Auftrag: «$command»\n" +
+            "Welcher Text muss jetzt eingetippt werden? Gleicher Stil wie damals, Schweizer Rechtschreibung. Gib NUR den Text aus."
+        if (cloudOk) try {
+            val resp = ClaudeClient.send(Prefs.apiKey(ctx), Prefs.model(ctx), "Du formulierst kurze Texte für Lirim.", JSONArray(),
+                JSONArray().put(JSONObject().put("role", "user").put("content", prompt)), maxTokens = 200)
+            Prefs.addCost(ctx, ClaudeClient.costUsd(Prefs.model(ctx), resp))
+            val c = resp.getJSONArray("content")
+            val t = (0 until c.length()).map { c.getJSONObject(it) }.filter { it.optString("type") == "text" }
+                .joinToString(" ") { it.optString("text") }.trim().trim('«', '»', '"')
+            if (t.isNotBlank()) return t
+        } catch (e: Exception) { log("Formulieren fehlgeschlagen: ${e.message?.take(80)}") }
+        if (LocalBrain.available(ctx)) try {
+            return LocalBrain.chat(ctx, "Du formulierst kurze Texte für Lirim. Antworte nur mit dem Text.", prompt).trim().trim('«', '»', '"').takeIf { it.isNotBlank() }
+        } catch (_: Throwable) {}
+        return null
+    }
+
+    // ------------------------------------------------------------------ 4. Claude (sparsam)
+
+    private fun now(): String = SimpleDateFormat("EEEE, d. MMMM yyyy, HH:mm", Locale.GERMAN).format(Date())
+
+    private fun cloudFresh(ctx: Context, command: String, prefix: List<Recipes.Step>) {
+        messages = JSONArray(); pendingResults = null
+        val sb = StringBuilder("[Jetzt: ${now()}]\n")
+        lastExchange?.let { sb.append("[Vorheriger Auftrag: $it]\n") }
+        sb.append(command)
+        if (prefix.isNotEmpty()) {
+            sb.append("\n\n(Ich habe schon angefangen: ")
+                .append(prefix.joinToString(" → ") { "${it.tool} ${it.args}" })
+                .append(". Mach vom aktuellen Bildschirm aus weiter.)\n\nAktueller Bildschirm:\n")
+                .append(JarvisService.instance?.readScreen() ?: "")
+        }
+        messages.put(JSONObject().put("role", "user").put("content", sb.toString()))
+        recorder = prefix.toMutableList()
+        cloud(ctx)
+    }
+
+    private fun cloudContinue(ctx: Context, answer: String) {
+        val content = JSONArray()
+        pendingResults?.let { pr -> for (i in 0 until pr.length()) content.put(pr.get(i)) }
+        pendingResults = null
+        content.put(JSONObject().put("type", "text").put("text", answer))
+        messages.put(JSONObject().put("role", "user").put("content", content))
+        recorder = null // Rückfragen-Dialoge nicht als Ablauf lernen
+        cloud(ctx)
     }
 
     private fun cloud(ctx: Context) {
         try {
             loop(ctx)
         } catch (e: ApiException) {
-            messages = JSONArray(); pendingResults = null
+            messages = JSONArray(); pendingResults = null; awaitingAnswer = false
             if (e.message?.contains("credit", ignoreCase = true) == true) {
                 Prefs.setCloudBlockedUntil(ctx, System.currentTimeMillis() + 6 * 3600_000L)
-                say("Dein Claude-Guthaben ist leer. Ich arbeite deshalb mit meinem lokalen Gehirn weiter." +
-                    if (!LocalBrain.available(ctx)) " Lade dafür unter GEHIRN ein Modell herunter." else "")
+                say("Dein Claude-Guthaben ist leer. Gelernte Abläufe und einfache Befehle funktionieren weiter gratis.")
             } else throw e
         }
     }
@@ -167,95 +337,156 @@ object Agent {
         JarvisService.instance?.overlay?.setStatus(text)
     }
 
+    private var recorder: MutableList<Recipes.Step>? = null
+    private var lastExchange: String? = null
+    @Volatile private var awaitingAnswer = false
+
     private fun loop(ctx: Context) {
         val key = Prefs.apiKey(ctx)
-        if (key.isBlank()) {
-            say("Bitte trag zuerst deinen API-Schlüssel in den Einstellungen ein.")
-            messages = JSONArray()
-            return
-        }
-        var webSearch = Prefs.webSearch(ctx)
+        val model = Prefs.model(ctx)
+        // Websuche nur, wenn du ausdrücklich danach fragst (spart Tokens)
+        val lc = currentCommand.lowercase()
+        var webSearch = Prefs.webSearch(ctx) || Regex("""internet|google|im web|such.*online|recherch|aktuell|news|nachrichten von heute""").containsMatchIn(lc)
+        val staticSys = systemPrompt()
+        val dynSys = Memory.promptBlock(ctx)
+        var cost = 0.0
 
-        for (step in 1..MAX_STEPS) {
-            if (stopRequested) {
-                log("⏹ Gestoppt.")
-                messages = JSONArray()
-                return
-            }
-            status("denke nach … (Schritt $step)")
-            prune()
+        try {
+            for (step in 1..MAX_STEPS) {
+                if (stopRequested) {
+                    log("⏹ Gestoppt.")
+                    messages = JSONArray()
+                    return
+                }
+                status("denke nach … (Schritt $step)")
+                prune()
 
-            val resp = try {
-                ClaudeClient.send(key, Prefs.model(ctx), systemPrompt(ctx), Tools.definitions(webSearch), messages)
-            } catch (e: ApiException) {
-                if (webSearch && e.message?.contains("web_search", ignoreCase = true) == true) {
-                    log("Websuche nicht verfügbar – ohne weiter.")
-                    webSearch = false
-                    ClaudeClient.send(key, Prefs.model(ctx), systemPrompt(ctx), Tools.definitions(false), messages)
-                } else throw e
-            }
+                val resp = try {
+                    ClaudeClient.send(key, model, staticSys, Tools.definitions(webSearch), messages, dynSys)
+                } catch (e: ApiException) {
+                    if (webSearch && e.message?.contains("web_search", ignoreCase = true) == true) {
+                        log("Websuche nicht verfügbar – ohne weiter.")
+                        webSearch = false
+                        ClaudeClient.send(key, model, staticSys, Tools.definitions(false), messages, dynSys)
+                    } else throw e
+                }
+                cost += ClaudeClient.costUsd(model, resp)
 
-            val content = resp.getJSONArray("content")
-            messages.put(JSONObject().put("role", "assistant").put("content", content))
+                val content = resp.getJSONArray("content")
+                messages.put(JSONObject().put("role", "assistant").put("content", content))
 
-            val results = JSONArray()
-            val texts = StringBuilder()
-            var endMessage: String? = null
+                val results = JSONArray()
+                val texts = StringBuilder()
+                var endMessage: String? = null
+                var question = false
 
-            for (i in 0 until content.length()) {
-                val b = content.getJSONObject(i)
-                when (b.optString("type")) {
-                    "text" -> {
-                        val t = b.optString("text").trim()
-                        if (t.isNotEmpty()) texts.append(t).append(' ')
-                    }
-                    "server_tool_use" -> log("🔎 Websuche …")
-                    "tool_use" -> {
-                        val id = b.getString("id")
-                        val name = b.getString("name")
-                        val input = b.optJSONObject("input") ?: JSONObject()
-                        when (name) {
-                            "fertig" -> {
-                                endMessage = input.optString("nachricht")
-                                results.put(toolResult(id, ToolOutput("ok")))
-                            }
-                            "frage_stellen" -> {
-                                endMessage = input.optString("frage")
-                                results.put(toolResult(id, ToolOutput("Frage gestellt. Die Antwort folgt im nächsten Text.")))
-                            }
-                            else -> {
-                                if (stopRequested) {
-                                    results.put(toolResult(id, ToolOutput("Abgebrochen.")))
-                                } else {
-                                    log("→ $name ${short(input)}")
-                                    status(describe(name, input))
-                                    results.put(toolResult(id, Tools.execute(ctx, name, input)))
+                for (i in 0 until content.length()) {
+                    val b = content.getJSONObject(i)
+                    when (b.optString("type")) {
+                        "text" -> {
+                            val t = b.optString("text").trim()
+                            if (t.isNotEmpty()) texts.append(t).append(' ')
+                        }
+                        "server_tool_use" -> { log("🔎 Websuche …"); recorder?.add(Recipes.Step("web_search", emptyMap())) }
+                        "tool_use" -> {
+                            val id = b.getString("id")
+                            val name = b.getString("name")
+                            val input = b.optJSONObject("input") ?: JSONObject()
+                            when (name) {
+                                "fertig" -> {
+                                    endMessage = input.optString("nachricht")
+                                    results.put(toolResult(id, ToolOutput("ok")))
+                                }
+                                "frage_stellen" -> {
+                                    endMessage = input.optString("frage")
+                                    question = true
+                                    results.put(toolResult(id, ToolOutput("Frage gestellt. Die Antwort folgt im nächsten Text.")))
+                                }
+                                else -> {
+                                    if (stopRequested) {
+                                        results.put(toolResult(id, ToolOutput("Abgebrochen.")))
+                                    } else {
+                                        log("→ $name ${short(input)}")
+                                        status(describe(name, input))
+                                        val rec = recordable(name, input)
+                                        val out = Tools.execute(ctx, name, input)
+                                        record(rec, out.text)
+                                        results.put(toolResult(id, out))
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            val end = endMessage
-            if (end != null) {
-                pendingResults = results
-                Memory.addHistory(ctx, currentCommand, end)
-                say(end)
-                return
+                val end = endMessage
+                if (end != null) {
+                    pendingResults = results
+                    if (question) awaitingAnswer = true
+                    else learn(ctx, end)
+                    Memory.addHistory(ctx, currentCommand, end)
+                    lastExchange = "${currentCommand.take(100)} → ${end.take(100)}"
+                    say(end)
+                    return
+                }
+                if (results.length() == 0) {
+                    val answer = texts.toString().trim()
+                    Memory.addHistory(ctx, currentCommand, answer)
+                    lastExchange = "${currentCommand.take(100)} → ${answer.take(100)}"
+                    say(answer)
+                    return
+                }
+                if (texts.isNotEmpty()) log("Jarvis denkt: ${texts.toString().trim().take(200)}")
+                messages.put(JSONObject().put("role", "user").put("content", results))
             }
-            if (results.length() == 0) {
-                // Nur Text, kein Werkzeug → fertig
-                val answer = texts.toString().trim()
-                Memory.addHistory(ctx, currentCommand, answer)
-                say(answer)
-                return
+            say("Ich habe die maximale Anzahl Schritte erreicht und höre hier auf.")
+            messages = JSONArray()
+        } finally {
+            if (cost > 0) {
+                Prefs.addCost(ctx, cost)
+                log("💰 ≈ ${rp(cost)} · diesen Monat ≈ ${rp(Prefs.monthCost(ctx))}")
             }
-            if (texts.isNotEmpty()) log("Jarvis denkt: ${texts.toString().trim().take(200)}")
-            messages.put(JSONObject().put("role", "user").put("content", results))
         }
-        say("Ich habe die maximale Anzahl Schritte erreicht und höre hier auf.")
-        messages = JSONArray()
+    }
+
+    /** Ungefähr in Rappen/Franken (1 $ ≈ 0.80 Fr.). */
+    fun rp(usd: Double): String {
+        val chf = usd * 0.80
+        return if (chf < 1.0) "%.2f Rp.".format(Locale.GERMAN, chf * 100).replace(',', '.') else "%.2f Fr.".format(Locale.US, chf)
+    }
+
+    // ---- Aufzeichnen, um Abläufe zu lernen
+
+    private fun recordable(name: String, input: JSONObject): Recipes.Step {
+        val args = mutableMapOf<String, String>()
+        input.keys().forEach { k -> args[k] = input.opt(k)?.toString() ?: "" }
+        if (name == "tippen" && input.has("id") && input.optString("id") != "null") {
+            val id = input.optInt("id", -1)
+            val label = JarvisService.instance?.labelOf(id)
+            return if (label.isNullOrBlank()) Recipes.Step("tippen_xy", args)   // nicht wiederholbar
+            else Recipes.Step("tippen", mapOf("text" to label))
+        }
+        if (name == "text_eingeben") {
+            return Recipes.Step(name, mapOf("text" to input.optString("text"), "absenden" to input.optBoolean("absenden", false).toString()))
+        }
+        return Recipes.Step(name, args)
+    }
+
+    private fun record(step: Recipes.Step, result: String) {
+        val r = recorder ?: return
+        val failed = result.startsWith("Fehler") || result.contains("fehlgeschlagen", true) ||
+            result.contains("Kein Element", true) || result.contains("nicht gefunden", true)
+        if (result.contains("NEIN")) { recorder = null; return }   // abgelehnt → nichts lernen
+        if (!failed) r.add(step)
+    }
+
+    private fun learn(ctx: Context, answer: String) {
+        val rec = recorder ?: return
+        recorder = null
+        val r = Recipes.build(currentCommand, rec, answer, System.currentTimeMillis()) ?: return
+        val isNew = RecipeStore.add(ctx, r)
+        log(if (isNew) "📚 Gelernt: «${r.template}» – nächstes Mal mache ich das selbst, gratis."
+            else "📚 Ablauf aktualisiert: «${r.template}»")
     }
 
     private fun toolResult(id: String, out: ToolOutput): JSONObject {
@@ -297,6 +528,9 @@ object Agent {
             m.put("content", cleaned)
         }
 
+        // Verlauf NICHT kürzen: er wird aus dem Cache gelesen (≈10 % Preis) – Kürzen würde den Cache zerstören.
+        // Nur alte Bilder entfernen und bei sehr langen Aufgaben notbremsen.
+        val total = messages.toString().length
         val keepFrom = messages.length() - 2
         for (i in 0 until keepFrom) {
             val m = messages.getJSONObject(i)
@@ -307,7 +541,7 @@ object Agent {
                 if (b.optString("type") != "tool_result") continue
                 when (val rc = b.opt("content")) {
                     is JSONArray -> b.put("content", "(altes Bild entfernt)")
-                    is String -> if (rc.length > 400) b.put("content", rc.take(160) + " … (alter Bildschirm gekürzt)")
+                    is String -> if (total > 200_000 && rc.length > 400) b.put("content", rc.take(160) + " … (gekürzt)")
                 }
             }
         }
@@ -329,35 +563,31 @@ object Agent {
         else -> "$name …"
     }
 
-    private fun systemPrompt(ctx: Context): String {
-        val now = SimpleDateFormat("EEEE, d. MMMM yyyy, HH:mm", Locale.GERMAN).format(Date())
-        return """
+    private fun systemPrompt(): String = """
 Du bist Jarvis, der persönliche Sprachassistent von Lirim auf seinem Samsung Galaxy S25 (Android). Du bedienst das Handy wie ein Mensch: Apps öffnen, Bildschirm lesen, tippen, Text eingeben, scrollen, wischen.
 
 Regeln:
 - Antworte immer auf Deutsch (Schweizer Rechtschreibung, «ss» statt «ß»), kurz und natürlich. Deine Antworten werden vorgelesen – keine Aufzählungen, kein Markdown.
-- Arbeite Schritt für Schritt. Nach jeder Aktion bekommst du den neuen Bildschirm als Liste mit Nummern [id]. Benutze diese Nummern für tippen, text_eingeben und lange_druecken. Die Nummern gelten nur für den zuletzt gelesenen Bildschirm.
-- Ist die Liste leer oder unklar (Bilder, Karten, Spiele, Web-Ansichten), mach einen screenshot und nutze tippen_xy.
+- Arbeite Schritt für Schritt und effizient (jeder Schritt kostet Geld). Nach jeder Aktion bekommst du automatisch den neuen Bildschirm – lies ihn nicht extra.
+- Bildschirmformat: [Nummer] "Text" (Beschreibung) {Hinweis}; k = klickbar, Eingabe = Eingabefeld, @x,y nur bei Elementen ohne Text.
+- tippen: Nimm wenn möglich den sichtbaren text (z. B. tippen text="Gruja"), sonst die id. So kann ich den Ablauf lernen und nächstes Mal selbst erledigen.
+- Übernimm Texte für Nachrichten möglichst wörtlich aus dem Auftrag.
+- screenshot nur, wenn die Liste wirklich leer/unbrauchbar ist (Bilder sind teuer).
 - Öffne Apps direkt mit app_oeffnen statt über den Startbildschirm.
-- Vor allem Unumkehrbaren – Nachricht/E-Mail senden, kaufen, bezahlen, buchen, bestellen, löschen, posten, anrufen, Sicherheitseinstellungen ändern – rufst du IMMER zuerst bestaetigen auf und machst nur bei JA weiter.
+- Vor allem Unumkehrbaren – Nachricht/E-Mail senden, kaufen, bezahlen, buchen, bestellen, löschen, posten, Sicherheitseinstellungen ändern – rufst du IMMER zuerst bestaetigen auf und machst nur bei JA weiter. anrufen fragt selbst.
 - Gib niemals Passwörter, PINs, Codes oder Kartendaten ein und lies sie nicht vor. Bei Anmeldungen bittest du Lirim, das selbst zu machen.
-- Manche Apps (Banking, TWINT, Bezahl-Apps) blockieren die Bedienung. Wenn etwas nicht geht, sag es ehrlich, statt zu raten.
-- Bei reinen Wissensfragen antworte direkt (bei Bedarf mit web_search) über fertig.
+- Manche Apps (Banking, TWINT) blockieren die Bedienung. Wenn etwas nicht geht, sag es ehrlich, statt zu raten.
+- Bei reinen Wissensfragen antworte direkt über fertig (Websuche nur, wenn vorhanden und nötig).
 - Fehlen dir Infos, nutze frage_stellen.
 - Bedien nicht die Jarvis-App selbst (ch.lirim.jarvis).
-- Beende jeden Auftrag mit fertig und einer Zusammenfassung in 1–2 Sätzen.
+- Beende jeden Auftrag mit fertig und einer Zusammenfassung in einem Satz.
 
-Persönlichkeit: Du bist eine hochentwickelte KI im Stil von J.A.R.V.I.S. – souverän, vorausschauend, mit trockenem, feinem Humor. Denk mit: Wenn dir bei einem Auftrag etwas Nützliches auffällt (ein besserer Weg, eine Erinnerung, ein Risiko), sag es in einem Satz.
-Du hast Zugriff auf Live-Daten (live_daten), Nachrichten (nachrichten_lesen) und Projekte (projekt_aktualisieren). Erwähnt Lirim ein Projekt oder einen Fortschritt, aktualisiere es.
+Persönlichkeit: Du bist eine hochentwickelte KI im Stil von J.A.R.V.I.S. – souverän, vorausschauend, mit trockenem, feinem Humor.
 
 Lernen und Gedächtnis:
-- Du hast ein Langzeitgedächtnis (unten). Nutze es: Spitznamen, Personen, Vorlieben und Routinen von Lirim gelten, ohne dass er sie wiederholen muss.
-- Erzählt Lirim etwas Dauerhaftes über sich (wer «Baba» ist, wie er etwas haben will, eine Routine wie «Feierabend = …»), speichere es mit merken. Sagt er «vergiss …», nutze vergessen.
-- Hast du in einer App einen Weg herausgefunden, gab es einen Umweg oder einen Fehler, speichere VOR fertig einen kurzen, konkreten Tipp mit erfahrung_speichern. So wirst du beim nächsten Mal schneller.
+- Nutze dein Langzeitgedächtnis (unten): Spitznamen, Personen, Vorlieben und Routinen gelten, ohne dass Lirim sie wiederholen muss.
+- Erzählt Lirim etwas Dauerhaftes über sich, speichere es mit merken. Sagt er «vergiss …», nutze vergessen.
+- Hast du in einer App einen Umweg oder Fehler erlebt, speichere VOR fertig einen kurzen Tipp mit erfahrung_speichern.
 - Speichere nie Passwörter, PINs, Codes, Karten- oder Kontonummern.
-- Stimmt etwas im Gedächtnis nicht mehr, korrigiere es (vergessen, dann merken).
-
-Jetzt ist: $now.
-""".trimIndent() + Memory.promptBlock(ctx)
-    }
+""".trimIndent()
 }

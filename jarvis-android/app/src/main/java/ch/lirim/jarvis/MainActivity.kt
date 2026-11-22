@@ -171,10 +171,7 @@ class MainActivity : Activity() {
         main.removeCallbacks(frameTick); main.post(frameTick)
         main.removeCallbacks(secondTick); main.post(secondTick)
         refreshNet(force = false)
-        // Mit lokalem Gehirn nicht beim Öffnen analysieren (blockiert sonst deine Befehle)
-        if (Insights.isStale(this) && Prefs.proactive(this) && !LocalBrain.available(this)) {
-            Thread { Insights.run(applicationContext, notify = false) }.start()
-        }
+        // Spar-Modus: Analyse nur noch auf Knopfdruck (ANALYSE), nie automatisch beim Öffnen
         panels.forEachIndexed { i, p -> if (p.alpha < 1f) p.reveal(150L + i * 120L) }
     }
 
@@ -265,11 +262,47 @@ class MainActivity : Activity() {
         statusLine = hudText(10f, Hud.CYAN).apply { letterSpacing = 0.08f }
         col.addView(statusLine, lp(4))
 
+        // Live-Widgets ganz oben (kein Scrollen nötig)
+        // System + Wetter nebeneinander
+        val twin = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val pSys = panel("System")
+        cpuVal = pSys.row("CPU")
+        cpuMeter = Meter(this); pSys.body.addView(cpuMeter, LinearLayout.LayoutParams(-1, dp(8)).apply { topMargin = dp(3) })
+        cpuSpark = Sparkline(this).apply { fixedMax = 1f }
+        pSys.body.addView(cpuSpark, LinearLayout.LayoutParams(-1, dp(28)).apply { topMargin = dp(4) })
+        ramVal = pSys.row("RAM")
+        ramMeter = Meter(this); pSys.body.addView(ramMeter, LinearLayout.LayoutParams(-1, dp(8)).apply { topMargin = dp(3) })
+        batVal = pSys.row("Energie")
+        tempVal = pSys.row("Temp")
+        diskVal = pSys.row("Disk")
+
+        val pWx = panel("Wetter")
+        wxPlace = pWx.text(10f, Hud.CYAN_SOFT)
+        val wxT = hudText(30f, Hud.ICE, true).apply { setShadowLayer(14f, 0f, 0f, Hud.CYAN) }
+        pWx.body.addView(wxT)
+        wxTemp = CountingText(wxT) { "%.1f°".format(it) }
+        wxDesc = pWx.text(12f, Hud.CYAN)
+        wxRange = pWx.text(11f)
+        wxWind = pWx.text(11f)
+        wxSpark = Sparkline(this, Hud.ORANGE)
+        pWx.body.addView(wxSpark, LinearLayout.LayoutParams(-1, dp(28)).apply { topMargin = dp(4) })
+        pWx.text(9f, Hud.CYAN_SOFT).text = "NÄCHSTE 24 H"
+
+        twin.addView(pSys, LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(6) })
+        twin.addView(pWx, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(6) })
+        col.addView(twin, lp(8))
+
+        val pMk = panel("Märkte · Live")
+        marketBody = pMk.body
+        pMk.setOnClickListener { refreshNet(force = true) }
+        col.addView(pMk, lp(8))
+
+
         // Reaktor
         reactor = ArcReactorView(this)
         reactor.setOnClickListener { if (listening) stopListening() else listen() }
         reactor.setOnLongClickListener { Agent.stop(); Speaker.stop(); stopListening(); true }
-        col.addView(reactor, LinearLayout.LayoutParams(-1, dp(300)).apply { topMargin = dp(6) })
+        col.addView(reactor, LinearLayout.LayoutParams(-1, dp(230)).apply { topMargin = dp(6) })
         kitt = ch.lirim.jarvis.hud.KittScanner(this).apply {
             visibility = if (Prefs.voiceFx(this@MainActivity) == "kitt") android.view.View.VISIBLE else android.view.View.GONE
         }
@@ -321,40 +354,6 @@ class MainActivity : Activity() {
         insightBody = pIns.body
         pIns.setOnClickListener { runAnalysis() }
         col.addView(pIns, lp(14))
-
-        // System + Wetter nebeneinander
-        val twin = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val pSys = panel("System")
-        cpuVal = pSys.row("CPU")
-        cpuMeter = Meter(this); pSys.body.addView(cpuMeter, LinearLayout.LayoutParams(-1, dp(8)).apply { topMargin = dp(3) })
-        cpuSpark = Sparkline(this).apply { fixedMax = 1f }
-        pSys.body.addView(cpuSpark, LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(4) })
-        ramVal = pSys.row("RAM")
-        ramMeter = Meter(this); pSys.body.addView(ramMeter, LinearLayout.LayoutParams(-1, dp(8)).apply { topMargin = dp(3) })
-        batVal = pSys.row("Energie")
-        tempVal = pSys.row("Temp")
-        diskVal = pSys.row("Disk")
-
-        val pWx = panel("Wetter")
-        wxPlace = pWx.text(10f, Hud.CYAN_SOFT)
-        val wxT = hudText(30f, Hud.ICE, true).apply { setShadowLayer(14f, 0f, 0f, Hud.CYAN) }
-        pWx.body.addView(wxT)
-        wxTemp = CountingText(wxT) { "%.1f°".format(it) }
-        wxDesc = pWx.text(12f, Hud.CYAN)
-        wxRange = pWx.text(11f)
-        wxWind = pWx.text(11f)
-        wxSpark = Sparkline(this, Hud.ORANGE)
-        pWx.body.addView(wxSpark, LinearLayout.LayoutParams(-1, dp(36)).apply { topMargin = dp(4) })
-        pWx.text(9f, Hud.CYAN_SOFT).text = "NÄCHSTE 24 H"
-
-        twin.addView(pSys, LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(6) })
-        twin.addView(pWx, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(6) })
-        col.addView(twin, lp(12))
-
-        val pMk = panel("Märkte · Live")
-        marketBody = pMk.body
-        pMk.setOnClickListener { refreshNet(force = true) }
-        col.addView(pMk, lp(12))
 
         val pPr = panel("Projekte")
         projectBody = pPr.body
@@ -545,7 +544,7 @@ class MainActivity : Activity() {
         if (Insights.running) return
         typer.append("✦ Starte eigenständige Analyse …")
         Thread {
-            val ok = Insights.run(applicationContext, notify = false)
+            val ok = Insights.run(applicationContext, notify = false, manual = true)
             main.post {
                 refreshInsights(); refreshProjects()
                 if (ok) Memory.insights(this).first.takeIf { it.isNotBlank() }?.let { Speaker.say(it) }

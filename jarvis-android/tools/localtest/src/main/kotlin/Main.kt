@@ -106,6 +106,22 @@ Hintergrundwissen über Lirim:
         "Such mir die nächste Verbindung nach Regensdorf"))
         println("  ${if (TaskLogic.isComplex(c)) "KOMPLEX" else "einfach"}  $c")
 
+    println("=== Direktbefehle (ohne KI)")
+    for (c in listOf("Hallo Jarvis, stell einen Wecker um 6:30", "weck mich um halb 7", "Timer 5 Minuten", "Ruf Gruja an",
+        "Öffne WhatsApp", "Öffne WhatsApp und schreib Ali", "Wie geht es dir?"))
+        println("  $c → ${ch.lirim.jarvis.core.QuickIntents.parse(c)}")
+    println("=== Gelernte Abläufe")
+    val S = ch.lirim.jarvis.core.Recipes::Step
+    val rec = listOf(S("app_oeffnen", mapOf("name" to "WhatsApp")), S("tippen", mapOf("text" to "Suchen")),
+        S("text_eingeben", mapOf("text" to "Gruja")), S("tippen", mapOf("text" to "Gruja")),
+        S("text_eingeben", mapOf("text" to "Ich komme später")),
+        S("bestaetigen", mapOf("frage" to "Soll ich die Nachricht an Gruja senden?")), S("tippen", mapOf("text" to "Senden")))
+    val recipe = ch.lirim.jarvis.core.Recipes.build("Schreib gruya auf WhatsApp, dass ich später komme", rec, "Erledigt.")
+    println("  Vorlage: ${recipe?.template}")
+    for (c in listOf("Schreib Ali auf WhatsApp, dass ich im Stau stehe", "Schreib Ali auf Signal, dass x"))
+        println("  $c → ${recipe?.let { ch.lirim.jarvis.core.Recipes.match(it, c) }}")
+    check(recipe != null && ch.lirim.jarvis.core.Recipes.match(recipe, "Schreib Ali auf WhatsApp, dass ich im Stau stehe") != null) { "Rezept-Test fehlgeschlagen" }
+
     Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
     if (args.size > 3) return
     for ((label, path) in listOf("E4B" to args[1], "E2B" to args[0])) {

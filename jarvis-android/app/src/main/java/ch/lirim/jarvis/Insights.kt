@@ -56,12 +56,16 @@ object Insights {
     }
 
     /** Blockierend – im Hintergrund aufrufen. */
-    fun run(c: Context, notify: Boolean): Boolean {
+    fun run(c: Context, notify: Boolean, manual: Boolean = false): Boolean {
         val key = Prefs.apiKey(c)
         val local = useLocal(c)
         if (running) return false
         if (local && (Agent.running || LocalBrain.isBusy())) return false
-        if (System.currentTimeMillis() - Agent.lastActivityAt() < 10 * 60_000L) return false
+        if (!manual && System.currentTimeMillis() - Agent.lastActivityAt() < 10 * 60_000L) return false
+        // Spar-Modus: Claude (kostet Guthaben) nur, wenn du ANALYSE drückst – im Hintergrund nur lokal
+        if (!local && !manual) return false
+        // Lokales Nachdenken im Hintergrund nur beim Laden (sonst wird das Handy heiss und langsam)
+        if (!manual && !(try { SystemStats.snapshot(c).charging } catch (_: Exception) { false })) return false
         if (!local && (key.isBlank() || System.currentTimeMillis() < Prefs.cloudBlockedUntil(c))) return false
         running = true
         Prefs.setLastInsightTry(c, System.currentTimeMillis())

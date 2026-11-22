@@ -3,12 +3,20 @@ package ch.lirim.jarvis
 import android.content.Context
 
 object Prefs {
-    const val DEFAULT_MODEL = "claude-sonnet-5-5"
+    const val DEFAULT_MODEL = "claude-haiku-5-5"
 
     private fun p(c: Context) = c.getSharedPreferences("jarvis", Context.MODE_PRIVATE)
 
     fun apiKey(c: Context): String = p(c).getString("api_key", "") ?: ""
     fun setApiKey(c: Context, v: String) = p(c).edit().putString("api_key", v.trim()).apply()
+
+    /** Spar-Umstellung (einmalig): Sonnet → Haiku, Websuche aus, Hybrid-Modus. */
+    fun migrate(c: Context) {
+        if (p(c).getBoolean("spar_v1", false)) return
+        val e = p(c).edit().putBoolean("spar_v1", true)
+        if ((p(c).getString("model", "") ?: "").let { it.isBlank() || it.contains("sonnet") }) e.putString("model", DEFAULT_MODEL)
+        e.putBoolean("web_search", false).putString("brain", "hybrid").apply()
+    }
 
     fun model(c: Context): String {
         val m = p(c).getString("model", DEFAULT_MODEL) ?: DEFAULT_MODEL
@@ -73,6 +81,19 @@ object Prefs {
     fun voiceFx(c: Context): String = p(c).getString("voice_fx", "none") ?: "none"
     fun setVoiceFx(c: Context, v: String) = p(c).edit().putString("voice_fx", v).apply()
 
-    fun webSearch(c: Context): Boolean = p(c).getBoolean("web_search", true)
+    fun webSearch(c: Context): Boolean = p(c).getBoolean("web_search", false)
     fun setWebSearch(c: Context, v: Boolean) = p(c).edit().putBoolean("web_search", v).apply()
+
+    // ---- Kosten (Schätzung in US-Dollar) pro Monat
+    private fun monthKey() = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.US).format(java.util.Date())
+    fun monthCost(c: Context): Double =
+        if (p(c).getString("cost_month", "") == monthKey()) p(c).getFloat("cost_usd", 0f).toDouble() else 0.0
+    fun addCost(c: Context, usd: Double) {
+        val cur = monthCost(c)
+        p(c).edit().putString("cost_month", monthKey()).putFloat("cost_usd", (cur + usd).toFloat()).apply()
+    }
+    fun savedTasks(c: Context): Int =
+        if (p(c).getString("saved_month", "") == monthKey()) p(c).getInt("saved_n", 0) else 0
+    fun addSaved(c: Context) =
+        p(c).edit().putString("saved_month", monthKey()).putInt("saved_n", savedTasks(c) + 1).apply()
 }

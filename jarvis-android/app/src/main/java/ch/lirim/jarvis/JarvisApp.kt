@@ -12,6 +12,7 @@ import java.util.Locale
 class JarvisApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        try { Prefs.migrate(this) } catch (_: Exception) {}
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             try {
