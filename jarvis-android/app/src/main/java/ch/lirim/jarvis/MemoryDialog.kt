@@ -12,6 +12,7 @@ object MemoryDialog {
             when (it.kind) {
                 "fakt" -> "🧠 [${it.key}] ${it.text}"
                 "app" -> "📚 [${it.key}] ${it.text}"
+                "skill" -> "⚙ ${it.key} → ${it.text}"
                 else -> "🕘 ${it.key} → ${it.text}"
             }
         }.toTypedArray()

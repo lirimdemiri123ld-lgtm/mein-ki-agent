@@ -4,6 +4,7 @@ import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
@@ -67,11 +68,11 @@ object LocalBrain {
      * Führt eine Anfrage exklusiv und mit Zeitlimit aus.
      * @param wait wie lange auf ein besetztes Gehirn gewartet wird
      */
-    private fun <T> exclusive(c: Context, wait: Long, timeoutMs: Long, body: (Engine) -> T): T {
+    private fun <T> exclusive(c: Context, m: Model, wait: Long, timeoutMs: Long, body: (Engine) -> T): T {
         if (!busy.tryAcquire(wait, TimeUnit.MILLISECONDS)) throw IllegalStateException("Mein Gehirn ist gerade beschäftigt.")
         try {
-            val firstLoad = engine == null || loadedId != active(c)?.id
-            val f = worker.submit<T> { body(ensureEngine(c)) }
+            val firstLoad = engine == null || loadedId != m.id
+            val f = worker.submit<T> { body(ensureEngine(c, m)) }
             return try {
                 f.get(if (firstLoad) timeoutMs + 180_000 else timeoutMs, TimeUnit.MILLISECONDS)
             } catch (e: TimeoutException) {
@@ -153,73 +154,123 @@ object LocalBrain {
         file(c, m).delete()
     }
 
+    // ---------------------------------------------------------------- Modellwahl
+
+    val small get() = models.first { it.id == "gemma4-e2b" }
+    val big get() = models.first { it.id == "gemma4-e4b" }
+
+    fun loadedModel(): Model? = models.firstOrNull { it.id == loadedId && engine != null }
+
+    /**
+     * Jarvis wählt selbst: einfache Dinge → schnell (bevorzugt das schon geladene Modell),
+     * komplexe Aufgaben → das grösste installierte Modell.
+     */
+    fun pick(c: Context, complex: Boolean): Model? {
+        val installed = models.filter { isInstalled(c, it) }
+        if (installed.isEmpty()) return null
+        if (!Prefs.autoModel(c)) return active(c)
+        if (complex) {
+            return installed.firstOrNull { it.id == big.id } ?: installed.firstOrNull { it.id == small.id } ?: installed.first()
+        }
+        loadedModel()?.let { if (it in installed) return it }
+        return installed.firstOrNull { it.id == small.id } ?: installed.first()
+    }
+
+    fun isBig(m: Model) = m.id == big.id
+
+    /** Grösseres Gehirn selbstständig laden (nur WLAN). @return true wenn ein Download gestartet wurde */
+    fun ensureBigDownloaded(c: Context): Boolean {
+        if (isInstalled(c, big) || progress(c, big) in 0..99) return false
+        val cm = c.getSystemService(android.net.ConnectivityManager::class.java)
+        if (cm.isActiveNetworkMetered) return false
+        val free = (c.getExternalFilesDir(null)?.usableSpace ?: 0L)
+        if (free < big.bytes * 2) return false
+        startDownload(c, big)
+        return true
+    }
+
     // ---------------------------------------------------------------- Engine
 
-    private fun ensureEngine(c: Context): Engine {
-        val m = active(c) ?: throw IllegalStateException("Kein lokales Modell installiert.")
+    @Volatile var visionOk = false
+        private set
+
+    private fun ensureEngine(c: Context, m: Model): Engine {
+        if (!isInstalled(c, m)) throw IllegalStateException("${m.title} ist nicht installiert.")
         synchronized(lock) {
             engine?.let { if (loadedId == m.id) return it }
             try { engine?.close() } catch (_: Exception) {}
             engine = null
-            Agent.log("🧠 Lade lokales Gehirn ${m.title} … (beim ersten Mal bis zu 2 Minuten)")
-            JarvisService.instance?.overlay?.setStatus("lade mein Gehirn … beim ersten Mal bis zu 2 Minuten")
+            loadedId = ""
+            Agent.log("🧠 Lade ${m.title} … (beim ersten Mal bis zu 2 Minuten)")
+            JarvisService.instance?.overlay?.setStatus("lade ${m.title.substringBefore(" ·")} …")
             loading = true
             val path = file(c, m).absolutePath
-            val e = try {
-                Engine(EngineConfig(modelPath = path, backend = Backend.GPU(), maxNumTokens = 8192, cacheDir = c.cacheDir.path))
-                    .also { it.initialize(); backendName = "GPU" }
-            } catch (t: Throwable) {
-                loading = true
-                Agent.log("GPU nicht verfügbar, nutze CPU (${t.message?.take(80)})")
+            fun make(backend: Backend, vision: Boolean) =
+                Engine(EngineConfig(modelPath = path, backend = backend,
+                    visionBackend = if (vision) Backend.GPU() else null,
+                    maxNumTokens = 8192, cacheDir = c.cacheDir.path)).also { it.initialize() }
+            val attempts = listOf(
+                Triple(Backend.GPU(), true, "GPU+Bild"),
+                Triple(Backend.GPU(), false, "GPU"),
+                Triple(Backend.CPU(), false, "CPU"),
+            )
+            var last: Throwable? = null
+            for ((b, v, name) in attempts) {
                 try {
-                    Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = c.cacheDir.path))
-                        .also { it.initialize(); backendName = "CPU" }
-                } catch (t2: Throwable) {
+                    val e = make(b, v)
+                    engine = e; loadedId = m.id; backendName = name; visionOk = v
                     loading = false
-                    throw IllegalStateException("Ich konnte die Modelldatei nicht öffnen. Ist der Download fertig? Sonst unter GEHIRN löschen und neu laden. (${t2.message?.take(60)})")
+                    Agent.log("🧠 ${m.title} bereit ($name)")
+                    return e
+                } catch (t: Throwable) {
+                    last = t
+                    Agent.log("… $name nicht möglich (${t.message?.take(60)})")
                 }
             }
-            engine = e
-            loadedId = m.id
             loading = false
-            Agent.log("🧠 Lokales Gehirn bereit ($backendName)")
-            return e
+            throw IllegalStateException("Ich konnte ${m.title} nicht öffnen. Unter GEHIRN löschen und neu laden. (${last?.message?.take(60)})")
         }
     }
 
     /** Einfache Textantwort (ohne Werkzeuge). */
-    fun chat(c: Context, system: String, prompt: String, wait: Long = 0): String = exclusive(c, wait, 120_000) { e ->
-        val cfg = ConversationConfig(
-            systemInstruction = Contents.of(system),
-            samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.7)
-        )
-        e.createConversation(cfg).use { conv ->
-            current = conv
-            conv.sendMessage(prompt).toString().trim()
+    fun chat(c: Context, system: String, prompt: String, wait: Long = 0, model: Model? = null): String {
+        val m = model ?: pick(c, false) ?: throw IllegalStateException("Kein lokales Modell installiert.")
+        return exclusive(c, m, wait, 120_000) { e ->
+            val cfg = ConversationConfig(
+                systemInstruction = Contents.of(system),
+                samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.6)
+            )
+            e.createConversation(cfg).use { conv ->
+                current = conv
+                conv.sendMessage(prompt).toString().trim()
+            }
         }
     }
 
     data class Step(val text: String, val toolName: String?, val args: Map<String, Any?>)
 
-    /** Ein Agenten-Schritt: das Modell wählt höchstens ein Werkzeug. */
-    fun step(c: Context, system: String, prompt: String, toolsJson: List<String>): Step = exclusive(c, 20_000, 60_000) { e ->
-        val providers = toolsJson.map { j ->
-            tool(object : OpenApiTool {
-                override fun getToolDescriptionJsonString() = j
-                override fun execute(paramsJsonString: String) = "{}"
-            })
+    /** Ein Agenten-Schritt: das Modell wählt höchstens ein Werkzeug. Optional mit Bildschirmfoto. */
+    fun step(c: Context, m: Model, system: String, prompt: String, toolsJson: List<String>, image: ByteArray? = null): Step =
+        exclusive(c, m, 20_000, 90_000) { e ->
+            val providers = toolsJson.map { j ->
+                tool(object : OpenApiTool {
+                    override fun getToolDescriptionJsonString() = j
+                    override fun execute(paramsJsonString: String) = "{}"
+                })
+            }
+            val cfg = ConversationConfig(
+                systemInstruction = Contents.of(system),
+                tools = providers,
+                automaticToolCalling = false,
+                samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.3)
+            )
+            e.createConversation(cfg).use { conv ->
+                current = conv
+                val msg: Message = if (image != null && visionOk)
+                    conv.sendMessage(Message.user(Contents.of(Content.ImageBytes(image), Content.Text(prompt))))
+                else conv.sendMessage(prompt)
+                val call = msg.toolCalls.firstOrNull()
+                Step(msg.toString().trim(), call?.name, call?.arguments ?: emptyMap())
+            }
         }
-        val cfg = ConversationConfig(
-            systemInstruction = Contents.of(system),
-            tools = providers,
-            automaticToolCalling = false,
-            samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.3)
-        )
-        e.createConversation(cfg).use { conv ->
-            current = conv
-            val msg: Message = conv.sendMessage(prompt)
-            val call = msg.toolCalls.firstOrNull()
-            Step(msg.toString().trim(), call?.name, call?.arguments ?: emptyMap())
-        }
-    }
 }

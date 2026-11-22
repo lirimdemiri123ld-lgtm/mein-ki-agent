@@ -1,62 +1,130 @@
 import com.google.ai.edge.litertlm.*
-import java.io.File
+import ch.lirim.jarvis.core.TaskLogic
 import ch.lirim.jarvis.core.ToolTextParser
+import java.io.File
 
-/** Simuliert genau einen Schritt wie in der App (gleiche Werkzeugliste, ähnlich langer Prompt). */
+/**
+ * Simulierter Handy-Test: echte Gemma-Modelle, echte Plan-/Ausführungslogik, nachgebaute App-Bildschirme.
+ * args: <E2B-Datei> <E4B-Datei> <local_tools.json>
+ */
+val screens = mapOf(
+    "home" to "App im Vordergrund: Jarvis (ch.lirim.jarvis)\n[1] TextView \"J.A.R.V.I.S.\"\n[2] EditText {Hinweis: Befehl eingeben} [klickbar, Eingabefeld]",
+    "wa_list" to "App im Vordergrund: WhatsApp (com.whatsapp)\n[1] TextView \"WhatsApp\"\n[2] ImageButton (Suchen) [klickbar]\n[3] View \"Ali Bellikaya\" (Letzte Nachricht: Ok bis morgen) [klickbar]\n[4] View \"Shukrije\" (Letzte Nachricht: Kaufst du Milch?) [klickbar]\n[5] View \"Baba Swisscom\" [klickbar]\n[6] ImageButton (Neuer Chat) [klickbar]",
+    "wa_chat_ali" to "App im Vordergrund: WhatsApp (com.whatsapp)\n[1] TextView \"Ali Bellikaya\"\n[2] TextView \"Ok bis morgen\"\n[3] EditText {Hinweis: Nachricht} [klickbar, Eingabefeld]\n[4] ImageButton (Sprachnachricht) [klickbar]",
+    "wa_chat_ali_typed" to "App im Vordergrund: WhatsApp (com.whatsapp)\n[1] TextView \"Ali Bellikaya\"\n[2] TextView \"Ok bis morgen\"\n[3] EditText \"%TEXT%\" [klickbar, Eingabefeld]\n[4] ImageButton (Senden) [klickbar]",
+    "wa_chat_ali_sent" to "App im Vordergrund: WhatsApp (com.whatsapp)\n[1] TextView \"Ali Bellikaya\"\n[2] TextView \"Ok bis morgen\"\n[3] TextView \"%TEXT%\" (gesendet)\n[4] EditText {Hinweis: Nachricht} [klickbar, Eingabefeld]",
+    "ol_inbox" to "App im Vordergrund: Outlook (com.microsoft.office.outlook)\n[1] TextView \"Posteingang\"\n[2] View \"Sebastian Lorenzen – Audit Regensdorf verschoben auf Donnerstag 9 Uhr\" (ungelesen) [klickbar]\n[3] View \"Ingmar Gehlen – Perfect Order Rate KW 47: 97,8 %\" (ungelesen) [klickbar]\n[4] View \"Newsletter Migros – Weihnachtsangebote\" [klickbar]\n[5] Button \"Filter\" [klickbar]",
+)
+
+class Sim {
+    var screen = "home"; var typed = ""; var sent = false; val log = mutableListOf<String>()
+    fun show() = screens[screen]!!.replace("%TEXT%", typed)
+    fun exec(tool: String, a: Map<String, Any?>): String {
+        log.add("$tool $a")
+        val s = a.values.joinToString(" ").lowercase()
+        return when (tool) {
+            "app_oeffnen" -> when {
+                s.contains("whatsapp") -> { screen = "wa_list"; "App WhatsApp geöffnet." }
+                s.contains("outlook") -> { screen = "ol_inbox"; "App Outlook geöffnet." }
+                else -> "App nicht gefunden."
+            }
+            "tippen" -> {
+                val id = (a["id"] as? Number)?.toInt() ?: a["id"].toString().toIntOrNull() ?: -1
+                when {
+                    screen == "wa_list" && id == 3 -> { screen = "wa_chat_ali"; "Auf [3] getippt." }
+                    screen == "wa_chat_ali_typed" && id == 4 -> { screen = "wa_chat_ali_sent"; sent = true; "Auf [4] getippt." }
+                    else -> "Auf [$id] getippt."
+                }
+            }
+            "text_eingeben" -> {
+                if (screen.startsWith("wa_chat_ali")) { typed = (a["text"] ?: "").toString(); screen = "wa_chat_ali_typed" }
+                if (a["absenden"] == true && screen == "wa_chat_ali_typed") { screen = "wa_chat_ali_sent"; sent = true }
+                "Text eingegeben."
+            }
+            "bestaetigen" -> "Lirim hat JA getippt. Du darfst fortfahren."
+            "bildschirm_lesen" -> "ok"
+            "taste" -> { if (s.contains("zurueck") && screen.startsWith("wa_chat")) screen = "wa_list"; "Taste gedrückt." }
+            else -> "ok"
+        }
+    }
+}
+
 fun main(args: Array<String>) {
-    val toolsJson = File(args[1]).readText()
-    val a = org.json.JSONArray(toolsJson)
-    val specs = (0 until a.length()).map { a.getJSONObject(it).toString() }
-    println("Werkzeuge: ${specs.size}")
+    val toolsJson = org.json.JSONArray(File(args[2]).readText())
+    val base = (0 until toolsJson.length()).map { toolsJson.getJSONObject(it).toString() }
+    val extra = listOf(
+        """{"name":"schritt_erledigt","description":"Der aktuelle Planschritt ist erledigt. Weiter zum nächsten.","parameters":{"type":"object","properties":{"ergebnis":{"type":"string","description":"kurz, was herauskam"}}}}""",
+        """{"name":"notiz","description":"Merkt sich eine Information für diesen Auftrag (z. B. Inhalt einer Mail, eine Uhrzeit, einen Preis).","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}""",
+        """{"name":"plan_aendern","description":"Ersetzt die restlichen Schritte, wenn der Plan nicht passt.","parameters":{"type":"object","properties":{"schritte":{"type":"string","description":"neue Schritte, durch ; getrennt"}},"required":["schritte"]}}""",
+    )
+    val specs = base + extra
+    val params = specs.associate { sp ->
+        val o = org.json.JSONObject(sp); val names = mutableListOf<String>()
+        o.optJSONObject("parameters")?.optJSONArray("required")?.let { r -> for (i in 0 until r.length()) names.add(r.getString(i)) }
+        o.optJSONObject("parameters")?.optJSONObject("properties")?.keys()?.forEach { if (it !in names) names.add(it) }
+        o.getString("name") to names.toList()
+    }
     val tools = specs.map { j -> tool(object : OpenApiTool { override fun getToolDescriptionJsonString() = j; override fun execute(p: String) = "{}" }) }
-    val memory = "\n\n## Dein Gedächtnis über Lirim\n" + listOf("- Baba = Kontakt «Baba Swisscom» (Vater)", "- Shukrije ist Lirims Frau", "- Arbeitet als Projektleiter bei Migros Online", "- Wohnt in Pratteln", "- Mag kurze, direkte Antworten").joinToString("\n")
     val system = """
 Du bist Jarvis, Lirims persönlicher KI-Assistent auf seinem Samsung Galaxy S25. Du läufst lokal auf dem Handy.
 Antworte immer auf Deutsch (Schweiz, «ss» statt «ß»), kurz, natürlich, souverän, mit feinem Humor. Kein Markdown.
-Du bedienst das Handy mit Werkzeugen: app_oeffnen, bildschirm_lesen, tippen (id aus der Bildschirmliste), text_eingeben, scrollen, taste, warten, wecker_stellen, nachrichten_lesen, live_daten.
+Du bedienst das Handy mit Werkzeugen. Die Bildschirmliste zeigt Elemente als [Nummer]; tippen und text_eingeben brauchen diese Nummer.
 Regeln:
 - Ist keine Aktion nötig (Frage, Plaudern, Erklärung): antworte direkt mit normalem Text, ohne Werkzeug.
 - Sonst rufe genau EIN Werkzeug auf. Apps öffnen, lesen, scrollen und Wecker stellen geht ohne Rückfrage.
 - Nur vor Senden, Kaufen, Bezahlen oder Löschen zuerst bestaetigen. anrufen fragt selbst nach.
-- Personen wie «meine Frau» oder «Baba» löst du mit dem Hintergrundwissen auf und rufst dann anrufen mit dem Namen auf.
-- Sagt Lirim, wer jemand ist (z. B. «Shukrije ist meine Frau»), speichere es mit merken (kategorie person).
-- Ist eine Aktion erledigt, rufe das Werkzeug fertig auf (nachricht = was du getan hast).
-- Das Hintergrundwissen unten nutzt du still. Erwähne es nur, wenn es direkt zur Frage passt.
-- Nie Passwörter oder PINs. Merke dir Dauerhaftes über Lirim mit merken.
-Jetzt: Sonntag, 22. November 2026, 00:10.
-""".trimIndent() + memory
+- Personen wie «meine Frau» oder «Baba» löst du mit dem Hintergrundwissen auf.
+- Arbeite den Plan ab. Ist ein Schritt erledigt: schritt_erledigt. Wichtige Infos unterwegs mit notiz festhalten. Am Ende fertig mit Zusammenfassung.
+- Wenn eine Aktion nichts bewirkt: etwas anderes versuchen (scrollen, zurück, anderes Element).
+- Nie Passwörter oder PINs.
+
+Hintergrundwissen über Lirim:
+- Shukrije ist Lirims Frau
+- Ali = Ali Bellikaya, Teamleiter
+""".trimIndent()
+
+    println("=== Router")
+    for (c in listOf("Wie geht es dir?", "Öffne WhatsApp", "Ruf meine Frau an", "Stell einen Wecker um 7",
+        "Schreib Ali auf WhatsApp, dass ich 10 Minuten später komme", "Fass meine ungelesenen Outlook-Mails zusammen",
+        "Such mir die nächste Verbindung nach Regensdorf"))
+        println("  ${if (TaskLogic.isComplex(c)) "KOMPLEX" else "einfach"}  $c")
+
     Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
-    val base = system.substringBefore("\n\n## Dein")
-    val variants = listOf("APP_WIE_NEU" to Pair(base + "\n\nHintergrundwissen über Lirim:\n" + memory.trim(), ""))
-    val known: Map<String, List<String>> = specs.associate { sp ->
-        val o = org.json.JSONObject(sp)
-        val props = o.optJSONObject("parameters")?.optJSONObject("properties")
-        val req = o.optJSONObject("parameters")?.optJSONArray("required")
-        val names = mutableListOf<String>()
-        if (req != null) for (i in 0 until req.length()) names.add(req.getString(i))
-        props?.keys()?.forEach { if (it !in names) names.add(it) }
-        o.getString("name") to names
-    }
-    println("=== Parser-Tests")
-    for (t in listOf("merken:kategorie=person,text=gruya als meine Frau abspeichern", "bestaetigen:frage:Ruf meine Frau mal an",
-        "bestaetigen{frage:<|\"|>Soll ich WhatsApp öffnen?<|\"|>}", "fertig", "fertig: Hallo Lirim", "app_oeffnen(name=\"WhatsApp\")",
-        "anrufen: Shukrije", "merken(kategorie:person,text:Gruja ist meine Frau) fertig", "wecker_stellen:stunde=7,minute=30", "Hallo, wie kann ich helfen?"))
-        println("  «$t» -> ${ToolTextParser.parse(t, known)}")
-    Engine(EngineConfig(modelPath = args[0], backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = "/tmp")).use { e ->
-        e.initialize()
-        for ((vn, v) in variants) {
-            println("=== $vn")
-            for (p in listOf("Was kannst du für mich tun?", "Öffne WhatsApp", "Ruf meine Frau an", "Gruja als meine Frau abspeichern", "Ruf Baba an", "Wie geht es dir?", "Stell einen Wecker um 7 Uhr")) {
-                try {
-                    e.createConversation(ConversationConfig(systemInstruction = Contents.of(v.first), tools = tools,
-                        automaticToolCalling = false, samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.3))).use { c ->
-                        val m = c.sendMessage(v.second + "Auftrag von Lirim: $p\n\nWas ist der nächste Schritt?")
-                        val call = m.toolCalls.firstOrNull()?.let { "${it.name} ${it.arguments}" }
-                            ?: ToolTextParser.parse(m.toString(), known)?.let { "(Text→) ${it.name} ${it.args}" }
-                            ?: "ANTWORT: " + ToolTextParser.cleanup(m.toString()).replace("\n", " ").take(200)
-                        println("[$p] => $call")
+    for ((label, path) in listOf("E4B" to args[1], "E2B" to args[0])) {
+        Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = "/tmp")).use { e ->
+            e.initialize()
+            for (cmd in listOf("Schreib Ali auf WhatsApp, dass ich 10 Minuten später komme", "Fass meine ungelesenen Outlook-Mails zusammen")) {
+                println("\n=== [$label] $cmd")
+                val t0 = System.currentTimeMillis()
+                val planText = e.createConversation(ConversationConfig(systemInstruction = Contents.of(TaskLogic.PLAN_SYSTEM),
+                    samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.6))).use { it.sendMessage(TaskLogic.planPrompt(cmd, "")).toString() }
+                val plan = TaskLogic.parsePlan(planText).toMutableList()
+                println("PLAN: " + plan.mapIndexed { i, p -> "${i + 1}. $p" }.joinToString(" | "))
+                val sim = Sim()
+                val st = TaskLogic.State(cmd, plan, screen = sim.show())
+                var result = "ABBRUCH"
+                for (step in 1..25) {
+                    val m = e.createConversation(ConversationConfig(systemInstruction = Contents.of(system), tools = tools,
+                        automaticToolCalling = false, samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.3))).use { it.sendMessage(TaskLogic.execPrompt(st)) }
+                    var name = m.toolCalls.firstOrNull()?.name; var a: Map<String, Any?> = m.toolCalls.firstOrNull()?.arguments ?: emptyMap()
+                    if (name == null) ToolTextParser.parse(m.toString(), params)?.let { name = it.name; a = it.args }
+                    st.hint = ""
+                    if (name == null) { result = "TEXT: " + ToolTextParser.cleanup(m.toString()).take(200); break }
+                    println("  $step. $name $a")
+                    when (name) {
+                        "fertig" -> { result = "FERTIG: ${a["nachricht"]}"; break }
+                        "schritt_erledigt" -> { a["ergebnis"]?.toString()?.takeIf { it.isNotBlank() }?.let { st.notes.add(it) }; st.current++; st.history.add("✓ Schritt erledigt")
+                            if (st.current >= plan.size) st.hint = "Alle Planschritte sind erledigt. Rufe jetzt fertig mit einer Zusammenfassung auf." }
+                        "notiz" -> { st.notes.add(a["text"].toString()); st.history.add("notiz gespeichert") }
+                        "plan_aendern" -> { val neu = a["schritte"].toString().split(";").map { it.trim() }.filter { it.length > 2 }
+                            while (plan.size > st.current) plan.removeAt(plan.size - 1); plan.addAll(neu) }
+                        else -> { val before = TaskLogic.fingerprint(st.screen); val r = sim.exec(name!!, a); st.screen = sim.show()
+                            if (TaskLogic.fingerprint(st.screen) == before && name in setOf("tippen", "text_eingeben")) st.hint = "Deine letzte Aktion hat am Bildschirm nichts verändert."
+                            st.history.add("$step. $name $a → $r") }
                     }
-                } catch (ex: Throwable) { println("FEHLER [$p] ${ex.message?.take(200)}") }
+                }
+                println("ERGEBNIS: $result")
+                println("WhatsApp gesendet: ${sim.sent} (Text: «${sim.typed}»)   Notizen: ${st.notes}   Zeit: ${(System.currentTimeMillis() - t0) / 1000}s")
             }
         }
     }

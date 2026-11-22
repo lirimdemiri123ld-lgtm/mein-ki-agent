@@ -278,7 +278,7 @@ class JarvisService : AccessibilityService() {
                             scaled.compress(Bitmap.CompressFormat.JPEG, 60, bos)
                             result = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
                             lastShotInfo = "Screenshot ${targetW}x$targetH px. Echter Bildschirm ${soft.width}x${soft.height} px. " +
-                                "Für tippen_xy die Bild-Koordinaten mit %.2f multiplizieren.".format(factor)
+                                String.format(java.util.Locale.US, "Für tippen_xy die Bild-Koordinaten mit %.2f multiplizieren.", factor)
                         }
                         hb.close()
                     } catch (e: Exception) {

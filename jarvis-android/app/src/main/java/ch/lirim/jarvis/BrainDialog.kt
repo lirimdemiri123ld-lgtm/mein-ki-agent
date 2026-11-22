@@ -36,8 +36,13 @@ object BrainDialog {
         group.setOnCheckedChangeListener { _, id -> Prefs.setBrain(a, modes[id - 1000].first) }
         box.addView(group)
 
+        box.addView(android.widget.CheckBox(a).apply {
+            text = "Jarvis wählt das Modell selbst (einfach → schnell, komplex → schlau)"
+            isChecked = Prefs.autoModel(a)
+            setOnCheckedChangeListener { _, v -> Prefs.setAutoModel(a, v) }
+        })
         box.addView(TextView(a).apply {
-            text = "\nLokale Gehirne (werden in den Handyspeicher geladen)"; textSize = 15f
+            text = "\nLokale Gehirne (werden in den Handyspeicher geladen)\nGelernte Fähigkeiten: ${Memory.skillCount(a)}"; textSize = 15f
         })
         val free = (a.getExternalFilesDir(null)?.usableSpace ?: 0L) / 1e9
         box.addView(TextView(a).apply { text = "Frei: %.0f GB".format(free); textSize = 12f })

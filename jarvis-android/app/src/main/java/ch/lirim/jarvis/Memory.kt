@@ -24,6 +24,10 @@ object Memory {
     data class Project(val name: String, val progress: Int, val status: String, val ts: Long)
     data class Tip(val title: String, val text: String)
 
+    data class Skill(val command: String, val plan: List<String>, val ts: Long)
+
+    private val skills = mutableListOf<Skill>()
+    private const val MAX_SKILLS = 500
     private val projects = linkedMapOf<String, Project>()
     private val tips = mutableListOf<Tip>()
     private var briefing = ""
@@ -76,6 +80,13 @@ object Memory {
                     tips.add(Tip(x.optString("title"), x.optString("text")))
                 }
             }
+            o.optJSONArray("skills")?.let { a ->
+                for (i in 0 until a.length()) {
+                    val x = a.getJSONObject(i)
+                    val p = x.optJSONArray("plan") ?: JSONArray()
+                    skills.add(Skill(x.getString("cmd"), (0 until p.length()).map { p.getString(it) }, x.optLong("ts")))
+                }
+            }
             briefing = o.optString("briefing")
             insightTs = o.optLong("insight_ts")
         } catch (e: Exception) {
@@ -103,6 +114,9 @@ object Memory {
             }
         })
         o.put("tips", JSONArray().apply { tips.forEach { put(JSONObject().put("title", it.title).put("text", it.text)) } })
+        o.put("skills", JSONArray().apply {
+            skills.forEach { put(JSONObject().put("cmd", it.command).put("plan", JSONArray(it.plan)).put("ts", it.ts)) }
+        })
         o.put("briefing", briefing)
         o.put("insight_ts", insightTs)
         val tmp = File(f.parentFile, "memory.tmp")
@@ -213,6 +227,36 @@ object Memory {
     @Synchronized
     fun insights(c: Context): Pair<String, List<Tip>> { load(c); return briefing to tips.toList() }
 
+    private fun words(s: String) = s.lowercase().split(Regex("[^a-zäöüéèà0-9]+")).filter { it.length >= 3 }.toSet()
+
+    /** Gelungenen Ablauf als Fähigkeit speichern (wächst unbegrenzt mit dem Speicher, max. $MAX_SKILLS). */
+    @Synchronized
+    fun saveSkill(c: Context, command: String, plan: List<String>) {
+        load(c)
+        if (plan.isEmpty()) return
+        skills.removeAll { norm(it.command) == norm(command) }
+        skills.add(Skill(command.take(200), plan.map { it.take(160) }, System.currentTimeMillis()))
+        while (skills.size > MAX_SKILLS) skills.removeAt(0)
+        save()
+        Agent.log("📚 Fähigkeit gelernt: ${command.take(60)}")
+    }
+
+    /** Passende Erfahrungen + gelernte Abläufe für einen neuen Auftrag. */
+    @Synchronized
+    fun hintsFor(c: Context, command: String): String {
+        load(c)
+        val w = words(command)
+        val sb = StringBuilder()
+        skills.map { it to (words(it.command) intersect w).size }
+            .filter { it.second >= 2 }.sortedByDescending { it.second }.take(2)
+            .forEach { (s, _) -> sb.append("Früher gelöst: «${s.command}» → ${s.plan.joinToString(" → ")}\n") }
+        val lc = command.lowercase()
+        lessons.filterKeys { lc.contains(it) }.forEach { (k, v) -> v.takeLast(4).forEach { sb.append("[$k] $it\n") } }
+        return sb.toString().trim()
+    }
+
+    fun skillCount(c: Context): Int { load(c); return skills.size }
+
     /** Text für den System-Prompt. */
     @Synchronized
     fun promptBlock(c: Context): String {
@@ -246,6 +290,7 @@ object Memory {
         val out = mutableListOf<Entry>()
         facts.forEach { out.add(Entry("fakt", it.cat, it.text)) }
         lessons.forEach { (k, v) -> v.forEach { out.add(Entry("app", k, it)) } }
+        skills.asReversed().forEach { out.add(Entry("skill", it.command, it.plan.joinToString(" → "))) }
         history.asReversed().forEach { (wc, r) -> out.add(Entry("verlauf", wc, r)) }
         return out
     }
@@ -257,6 +302,7 @@ object Memory {
             "fakt" -> facts.removeAll { it.text == e.text }
             "app" -> { lessons[e.key]?.remove(e.text); lessons.entries.removeAll { it.value.isEmpty() } }
             "verlauf" -> history.removeAll { it.first == e.key && it.second == e.text }
+            "skill" -> skills.removeAll { it.command == e.key }
         }
         save()
     }
@@ -264,7 +310,7 @@ object Memory {
     @Synchronized
     fun clearAll(c: Context) {
         load(c)
-        facts.clear(); lessons.clear(); history.clear(); projects.clear(); tips.clear(); briefing = ""
+        facts.clear(); lessons.clear(); history.clear(); projects.clear(); tips.clear(); skills.clear(); briefing = ""
         save()
     }
 }
