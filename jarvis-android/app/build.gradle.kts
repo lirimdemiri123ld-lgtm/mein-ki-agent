@@ -58,13 +58,11 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.47@aar")
     implementation("org.apache.commons:commons-compress:1.27.1")
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
-    implementation("org.jetbrains.kotlin:kotlin-reflect:2.4.0")
+    testImplementation("junit:junit:4.13.2")
 }
 
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        freeCompilerArgs.addAll(listOf("-Xskip-metadata-version-check", "-Xlambdas=class"))
     }
 }

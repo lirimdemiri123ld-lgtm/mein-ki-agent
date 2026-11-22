@@ -45,7 +45,7 @@ class ArcReactorView(c: Context) : View(c) {
     private val rect = RectF()
     private val path = Path()
 
-    init { setLayerType(LAYER_TYPE_SOFTWARE, null) }
+    // Kein Software-Layer mehr: die Grafikkarte zeichnet den Reaktor (viel weniger Rechenlast)
 
     private fun accent(): Int = when (state) {
         State.THINKING -> Hud.ORANGE

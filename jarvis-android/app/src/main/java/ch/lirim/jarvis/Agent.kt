@@ -3,10 +3,10 @@ package ch.lirim.jarvis
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import ch.lirim.jarvis.core.Intents
 import ch.lirim.jarvis.core.People
-import ch.lirim.jarvis.core.QuickIntents
 import ch.lirim.jarvis.core.Recipes
-import ch.lirim.jarvis.core.TaskLogic
+import ch.lirim.jarvis.core.Intent as Cmd
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -49,13 +49,11 @@ object Agent {
         pendingResults = null
         awaitingAnswer = false
         lastExchange = null
-        LocalAgent.reset()
         log("— Neues Gespräch —")
     }
 
     fun stop() {
         stopRequested = true
-        LocalBrain.cancel()
         Speaker.stop()
     }
 
@@ -95,98 +93,50 @@ object Agent {
     // ------------------------------------------------------------------ Weiche
 
     /**
-     * Spar-Weiche:
-     *  1. Einfache Befehle (Wecker, Timer, Anrufen, App öffnen) → ohne KI, gratis
+     * Spar-Weiche (die erste passende Stufe gewinnt):
+     *  0. Antwort auf eine Rückfrage → gehört zum laufenden Auftrag
+     *  1. Direktbefehle (Wecker, Anruf, Nachricht, Lautstärke, Wetter …) → ohne KI, gratis
      *  2. Gelernte Abläufe → selbst abspielen, gratis
-     *  3. Plaudern/Fragen → lokales Gehirn, gratis
-     *  4. Neue Aufgaben in Apps → Claude Haiku (sparsam), danach wird der Ablauf gelernt
+     *  3. Alles andere → Claude Haiku (sparsam); danach wird der Ablauf gelernt
+     * Kein lokales Sprachmodell mehr: es war langsam, heizte das Handy und erfand Erfolge.
      */
     private fun route(ctx: Context, command: String) {
-        val mode = Prefs.brain(ctx)
-        val lc = command.lowercase()
-        val forceCloud = lc.startsWith("claude") || lc.contains("mit claude")
         val hasKey = Prefs.apiKey(ctx).isNotBlank()
-        val cloudOk = hasKey && mode != "local" && System.currentTimeMillis() >= Prefs.cloudBlockedUntil(ctx)
+        val cloudOk = hasKey && System.currentTimeMillis() >= Prefs.cloudBlockedUntil(ctx)
 
-        // Antwort auf eine Rückfrage von Claude → im selben Gespräch weiter
-        if (awaitingAnswer && cloudOk) {
+        if (awaitingAnswer && messages.length() > 0) {
             awaitingAnswer = false
-            cloudContinue(ctx, command)
-            return
+            if (cloudOk) { cloudContinue(ctx, command); return }
         }
         awaitingAnswer = false
         messages = JSONArray(); pendingResults = null
-        var prefix: List<Recipes.Step> = emptyList()
+        thorough = false
+        var text = command
+        var forceCloud = false
 
+        val intent = try { Intents.parse(command) } catch (e: Exception) { null }
+        if (intent is Cmd.Cloud) {
+            forceCloud = true; thorough = intent.thorough; text = intent.text; currentCommand = text
+        } else if (intent != null) {
+            when (Direct.run(ctx, command, intent)) {
+                Direct.Result.DONE -> { Prefs.addSaved(ctx); Memory.addHistory(ctx, command, "(direkt erledigt, 0 Rp.)"); return }
+                Direct.Result.STOPPED -> return
+                Direct.Result.PASS -> {}
+            }
+        }
+
+        var prefix: List<Recipes.Step> = emptyList()
         if (!forceCloud) {
-            if (quick(ctx, command)) { Prefs.addSaved(ctx); return }
-            when (replay(ctx, command, cloudOk)) {
+            when (replay(ctx, text, cloudOk)) {
                 Replay.DONE -> { Prefs.addSaved(ctx); return }
                 Replay.STOPPED -> return
-                Replay.PARTIAL -> {
-                    prefix = replayDone
-                    if (cloudOk) { cloudFresh(ctx, command, prefix); return }
-                }
+                Replay.PARTIAL -> prefix = replayDone
                 Replay.NONE -> {}
             }
         }
-
-        val chat = TaskLogic.isChatOnly(command)
-        if (cloudOk && (forceCloud || mode == "cloud" || !chat)) { cloudFresh(ctx, command, prefix); return }
-        if ((forceCloud || mode == "cloud") && !hasKey) {
-            say("Bitte trag zuerst deinen API-Schlüssel in den Einstellungen ein."); return
-        }
-
-        if (LocalBrain.available(ctx)) {
-            val hybrid = mode == "hybrid" && cloudOk
-            val r = LocalAgent.run(ctx, command, hybrid, { stopRequested }) { say(it) }
-            when (r) {
-                LocalAgent.Result.DONE -> { Memory.addHistory(ctx, command, "(lokal erledigt)"); Prefs.addSaved(ctx) }
-                LocalAgent.Result.STOPPED -> log("⏹ Gestoppt.")
-                else -> {
-                    if (cloudOk) { log("Lokal nicht lösbar – Claude übernimmt."); cloudFresh(ctx, command, emptyList()) }
-                    else if (r == LocalAgent.Result.FAILED) say("Mein lokales Gehirn hatte ein Problem: ${LocalAgent.lastError.take(120)}")
-                    else say(if (hasKey) "Das schaffe ich lokal nicht, und dein Claude-Guthaben ist leer." else "Das schaffe ich lokal nicht.")
-                }
-            }
-            return
-        }
-        if (cloudOk) { cloudFresh(ctx, command, prefix); return }
-        val dl = LocalBrain.models.map { LocalBrain.progress(ctx, it) }.firstOrNull { it in 0..99 }
-        if (dl != null) { say("Mein lokales Gehirn lädt noch, $dl Prozent. Gleich bin ich bereit."); return }
-        say(if (!hasKey) "Für diese Aufgabe brauche ich Claude. Trag unter SYSTEM deinen API-Schlüssel ein."
-            else "Dein Claude-Guthaben ist leer. Für Plaudern kannst du unter GEHIRN ein lokales Modell laden.")
-    }
-
-    // ------------------------------------------------------------------ 1. Ohne KI
-
-    private fun quick(ctx: Context, command: String): Boolean {
-        val i = QuickIntents.parse(command) ?: return false
-        log("⚡ Direkt erledigt (ohne KI)")
-        when (i) {
-            is QuickIntents.Intent.Alarm -> {
-                Tools.execute(ctx, "wecker_stellen", JSONObject().put("stunde", i.hour).put("minute", i.minute))
-                say("Wecker auf ${i.hour}:${"%02d".format(i.minute)} gestellt.")
-            }
-            is QuickIntents.Intent.Timer -> {
-                Tools.execute(ctx, "timer_stellen", JSONObject().put("sekunden", i.seconds))
-                val m = i.seconds / 60; val s = i.seconds % 60
-                say("Timer läuft: " + listOfNotNull(if (m > 0) "$m Minuten" else null, if (s > 0) "$s Sekunden" else null).joinToString(" und ") + ".")
-            }
-            is QuickIntents.Intent.Call -> {
-                val who = People.resolve(i.who, Memory.factTexts(ctx))
-                    ?: if (People.isRelational(i.who)) return false else i.who
-                val out = Tools.execute(ctx, "anrufen", JSONObject().put("wen", who)).text.substringBefore("\n\nAktueller Bildschirm").trim()
-                say(out)
-            }
-            is QuickIntents.Intent.OpenApp -> {
-                val out = Tools.execute(ctx, "app_oeffnen", JSONObject().put("name", i.app)).text.substringBefore("\n\nAktueller Bildschirm").trim()
-                if (!out.contains("geöffnet")) return false.also { log(out) }
-                say(Regex("""App (.+?) geöffnet""").find(out)?.groupValues?.get(1)?.let { "$it ist offen." } ?: "Erledigt.")
-            }
-        }
-        Memory.addHistory(ctx, command, "(direkt erledigt)")
-        return true
+        if (cloudOk) { cloudFresh(ctx, text, prefix); return }
+        say(if (!hasKey) "Dafür brauche ich Claude. Trag unter SYSTEM deinen API-Schlüssel ein."
+            else "Dein Claude-Guthaben ist leer – bitte aufladen und im HUD unter Guthaben eintragen. Direktbefehle und gelernte Abläufe laufen weiter.")
     }
 
     // ------------------------------------------------------------------ 2. Gelernte Abläufe
@@ -279,9 +229,6 @@ object Agent {
                 .joinToString(" ") { it.optString("text") }.trim().trim('«', '»', '"')
             if (t.isNotBlank()) return t
         } catch (e: Exception) { log("Formulieren fehlgeschlagen: ${e.message?.take(80)}") }
-        if (LocalBrain.available(ctx)) try {
-            return LocalBrain.chat(ctx, "Du formulierst kurze Texte für Lirim. Antworte nur mit dem Text.", prompt).trim().trim('«', '»', '"').takeIf { it.isNotBlank() }
-        } catch (_: Throwable) {}
         return null
     }
 
@@ -320,16 +267,27 @@ object Agent {
             loop(ctx)
         } catch (e: ApiException) {
             messages = JSONArray(); pendingResults = null; awaitingAnswer = false
-            if (e.message?.contains("credit", ignoreCase = true) == true) {
-                Prefs.setCloudBlockedUntil(ctx, System.currentTimeMillis() + 6 * 3600_000L)
+            val msg = e.message.orEmpty()
+            if (e.code == 402 || msg.contains("credit", true) || msg.contains("billing", true)) {
+                // Nur kurz sperren – der nächste Versuch prüft neu, Aufladen wird also sofort erkannt
+                Prefs.setCloudBlockedUntil(ctx, System.currentTimeMillis() + 90_000L)
                 Prefs.setCreditBalance(ctx, 0.0)
-                say("Dein Claude-Guthaben ist leer. Gelernte Abläufe und einfache Befehle funktionieren weiter gratis.")
+                say("Dein Claude-Guthaben ist leer – bitte aufladen. Direktbefehle und gelernte Abläufe laufen weiter gratis.")
+            } else if (e.code == 401) {
+                say("Der API-Schlüssel wird nicht akzeptiert. Bitte unter SYSTEM prüfen.")
             } else throw e
         }
     }
 
+    @Volatile var lastSaid = ""
+        private set
+
+    /** Spricht und protokolliert (auch für Direktbefehle). */
+    fun speak(text: String) = say(text)
+
     private fun say(text: String) {
         if (text.isBlank()) return
+        lastSaid = text
         log("Jarvis: $text")
         Speaker.say(text)
     }
@@ -340,14 +298,20 @@ object Agent {
 
     private var recorder: MutableList<Recipes.Step>? = null
     private var lastExchange: String? = null
-    @Volatile private var awaitingAnswer = false
+    /** Jarvis hat eine Rückfrage gestellt – die nächste Eingabe gehört zum selben Auftrag. */
+    @Volatile var awaitingAnswer = false
+        private set
+    @Volatile var questionId = 0
+        private set
+    private var thorough = false
 
     private fun loop(ctx: Context) {
         val key = Prefs.apiKey(ctx)
-        val model = Prefs.model(ctx)
+        val model = if (thorough) "claude-sonnet-5-5" else Prefs.model(ctx)
         // Websuche nur, wenn du ausdrücklich danach fragst (spart Tokens)
         val lc = currentCommand.lowercase()
-        var webSearch = Prefs.webSearch(ctx) || Regex("""internet|google|im web|such.*online|recherch|aktuell|news|nachrichten von heute""").containsMatchIn(lc)
+        // Eine Websuche kostet ≈ 1 Rp. – nur wenn erlaubt UND ausdrücklich verlangt
+        var webSearch = Prefs.webSearch(ctx) && Regex("""im internet|im web|im netz|websuche|recherchier|online nach""").containsMatchIn(lc)
         val staticSys = systemPrompt()
         val dynSys = Memory.promptBlock(ctx)
         var cost = 0.0
@@ -423,7 +387,7 @@ object Agent {
                 val end = endMessage
                 if (end != null) {
                     pendingResults = results
-                    if (question) awaitingAnswer = true
+                    if (question) { awaitingAnswer = true; questionId++ }
                     else learn(ctx, end)
                     Memory.addHistory(ctx, currentCommand, end)
                     lastExchange = "${currentCommand.take(100)} → ${end.take(100)}"
@@ -434,6 +398,8 @@ object Agent {
                     val answer = texts.toString().trim()
                     Memory.addHistory(ctx, currentCommand, answer)
                     lastExchange = "${currentCommand.take(100)} → ${answer.take(100)}"
+                    // Endet die Antwort mit einer Frage, läuft die nächste Eingabe im selben Auftrag weiter
+                    if (answer.trimEnd().endsWith("?")) { awaitingAnswer = true; pendingResults = null; questionId++ }
                     say(answer)
                     return
                 }

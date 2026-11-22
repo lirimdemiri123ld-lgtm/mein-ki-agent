@@ -23,6 +23,29 @@ class VoiceAnswer(private val ctx: Context, private val onAnswer: (Boolean) -> U
     @Volatile private var cancelled = false
     private var rec: SpeechRecognizer? = null
 
+    companion object {
+        /** Offene Rückfrage: Jarvis fragt, hört selbst zu und liefert die Antwort – im selben Auftrag. */
+        fun askText(ctx: Context, question: String): String? {
+            Agent.log("❓ $question")
+            Speaker.say(question)
+            JarvisService.instance?.overlay?.setStatus(question)
+            if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return null
+            if (!SpeechRecognizer.isRecognitionAvailable(ctx)) return null
+            // Warten, bis die Frage fertig vorgelesen ist (sonst hört Jarvis sich selbst)
+            Thread.sleep(400)
+            var waited = 0
+            while (Speaker.speaking && waited < 20_000) { Thread.sleep(150); waited += 150 }
+            Thread.sleep(250)
+            WakeWordService.pause(ctx)
+            val va = VoiceAnswer(ctx) {}
+            for (attempt in 1..2) {
+                val t = va.listenOnce()
+                if (!t.isNullOrBlank()) { Agent.log("🎤 «$t»"); return t }
+            }
+            return null
+        }
+    }
+
     fun cancel() {
         cancelled = true
         main.post { try { rec?.destroy() } catch (_: Exception) {}; rec = null }
@@ -51,7 +74,7 @@ class VoiceAnswer(private val ctx: Context, private val onAnswer: (Boolean) -> U
         }
     }
 
-    private fun listenOnce(): String? {
+    internal fun listenOnce(): String? {
         val latch = CountDownLatch(1)
         var text: String? = null
         main.post {

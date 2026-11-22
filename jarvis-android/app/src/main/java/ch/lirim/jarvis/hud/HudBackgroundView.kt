@@ -25,7 +25,7 @@ class HudBackgroundView(c: Context) : View(c) {
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         bg.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), Hud.BG_TOP, Hud.BG_BOTTOM, Shader.TileMode.CLAMP)
         particles.clear()
-        repeat(55) {
+        repeat(24) {
             particles.add(
                 P(Random.nextFloat() * w, Random.nextFloat() * h,
                     (Random.nextFloat() - 0.5f) * 0.4f * dp, (Random.nextFloat() - 0.5f) * 0.4f * dp,
@@ -37,7 +37,7 @@ class HudBackgroundView(c: Context) : View(c) {
     override fun onDraw(c: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        t += 0.016f
+        t += 0.033f
         c.drawRect(0f, 0f, w, h, bg)
 
         // Raster mit leichter Bewegung
@@ -77,6 +77,6 @@ class HudBackgroundView(c: Context) : View(c) {
         line.alpha = 140
         c.drawLine(0f, sy, w, sy, line)
 
-        postInvalidateDelayed(33)
+        postInvalidateDelayed(66)   // 15 Bilder/s genügen für den ruhigen Hintergrund
     }
 }

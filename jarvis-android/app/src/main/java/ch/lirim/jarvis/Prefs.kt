@@ -110,4 +110,9 @@ object Prefs {
         p(c).getString(key(q), null)?.split("|")?.takeIf { it.size == 2 }?.let { it[0] to it[1] }
     fun setChosenNumber(c: Context, q: String, name: String, number: String) =
         p(c).edit().putString(key(q), "$name|$number").apply()
+    fun clearChosenNumber(c: Context, q: String) = p(c).edit().remove(key(q)).apply()
+
+    /** Sprache der Spracherkennung: «de-CH» (Standard) oder «de-DE». */
+    fun sttLang(c: Context): String = p(c).getString("stt_lang", "de-CH") ?: "de-CH"
+    fun setSttLang(c: Context, v: String) = p(c).edit().putString("stt_lang", v).apply()
 }

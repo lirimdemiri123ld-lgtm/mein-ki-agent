@@ -13,6 +13,17 @@ class JarvisApp : Application() {
     override fun onCreate() {
         super.onCreate()
         try { Prefs.migrate(this) } catch (_: Exception) {}
+        // Die lokalen KI-Modelle (mehrere GB) werden nicht mehr gebraucht → Speicher freigeben
+        Thread {
+            try {
+                val dir = File(getExternalFilesDir(null) ?: filesDir, "models")
+                if (dir.exists()) {
+                    val mb = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } / 1_048_576
+                    dir.deleteRecursively()
+                    if (mb > 0) Agent.log("🧹 Alte lokale KI-Modelle entfernt: $mb MB frei.")
+                }
+            } catch (_: Throwable) {}
+        }.start()
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             try {

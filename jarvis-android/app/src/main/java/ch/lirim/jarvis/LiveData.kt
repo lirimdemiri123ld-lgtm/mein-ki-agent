@@ -90,7 +90,8 @@ object Weather {
     data class Now(
         val place: String, val temp: Double, val feels: Double, val code: Int, val wind: Double,
         val humidity: Int, val min: Double, val max: Double, val rainProb: Int,
-        val hourly: List<Float>, val sunset: String
+        val hourly: List<Float>, val sunset: String,
+        val tMin: Double = Double.NaN, val tMax: Double = Double.NaN, val tRain: Int = -1
     )
 
     @Volatile var last: Now? = null
@@ -137,7 +138,9 @@ object Weather {
             cur.getInt("weather_code"), cur.getDouble("wind_speed_10m"), cur.getInt("relative_humidity_2m"),
             d.getJSONArray("temperature_2m_min").getDouble(0), d.getJSONArray("temperature_2m_max").getDouble(0),
             d.getJSONArray("precipitation_probability_max").optInt(0), hours,
-            d.getJSONArray("sunset").getString(0).substringAfter('T')
+            d.getJSONArray("sunset").getString(0).substringAfter('T'),
+            d.getJSONArray("temperature_2m_min").optDouble(1), d.getJSONArray("temperature_2m_max").optDouble(1),
+            d.getJSONArray("precipitation_probability_max").optInt(1, -1)
         )
         lastFetch = System.currentTimeMillis()
         return last

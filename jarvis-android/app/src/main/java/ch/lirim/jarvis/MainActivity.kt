@@ -93,6 +93,8 @@ class MainActivity : Activity() {
 
     // Spracherkennung im eigenen Interface
     private var recognizer: SpeechRecognizer? = null
+    private var preferGoogle = true
+    private var usingGoogle = false
     @Volatile private var listening = false
     private var micLevel = 0f
 
@@ -108,7 +110,8 @@ class MainActivity : Activity() {
         Speaker.init(this)
         buildUi()
         if (savedInstanceState == null) handleIntent(intent)
-        Insights.schedule(this)
+        // alte Hintergrund-Analyse (kostete Geld/Akku) endgültig abschalten
+        try { getSystemService(android.app.job.JobScheduler::class.java).cancel(4711) } catch (_: Exception) {}
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -122,7 +125,7 @@ class MainActivity : Activity() {
         val explicit = i?.getBooleanExtra(EXTRA_LISTEN, false) == true
         val assist = i?.action == Intent.ACTION_ASSIST
         val launcher = i?.action == Intent.ACTION_MAIN && Prefs.autoListen(this)
-        if ((explicit || assist || launcher) && (Prefs.apiKey(this).isNotBlank() || LocalBrain.available(this)) && !Agent.running) {
+        if ((explicit || assist || launcher) && !Agent.running) {
             main.postDelayed({ listen() }, 450)
         }
     }
@@ -170,7 +173,6 @@ class MainActivity : Activity() {
         typer.setAll(lastLines(Agent.fullLog(), 14))
         Agent.listener = { s -> typer.append(s) }
         NotificationStore.listener = { main.post { refreshComms() } }
-        Insights.listener = { main.post { refreshInsights(); refreshProjects() } }
         updateStatus()
         refreshProjects(); refreshComms(); refreshInsights(); refreshCredit(); refreshAgenda()
         main.removeCallbacks(frameTick); main.post(frameTick)
@@ -185,7 +187,6 @@ class MainActivity : Activity() {
         visible = false
         Agent.listener = null
         NotificationStore.listener = null
-        Insights.listener = null
         main.removeCallbacks(frameTick)
         main.removeCallbacks(secondTick)
         super.onPause()
@@ -368,13 +369,13 @@ class MainActivity : Activity() {
         chips.addView(chip("⬢ GEHIRN") { BrainDialog.show(this) }, chipLp())
         chips.addView(chip("◎ STIMME") { voiceMenu() }, chipLp())
         chips.addView(chip("◈ GEDÄCHTNIS") { MemoryDialog.show(this) }, chipLp())
-        chips.addView(chip("✦ ANALYSE") { runAnalysis() }, chipLp())
+        chips.addView(chip("✦ BRIEFING") { runAnalysis() }, chipLp())
         chips.addView(chip("⚿ ZUGRIFF") { accessMenu() }, chipLp())
         chips.addView(chip("⚙ SYSTEM") { showSettings() }, chipLp())
         col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) }, lp(10))
 
         // Panel: Analyse / Tipps
-        val pIns = panel("Jarvis Analyse · Empfehlungen")
+        val pIns = panel("Lagebericht · gratis")
         insightBody = pIns.body
         pIns.setOnClickListener { runAnalysis() }
         col.addView(pIns, lp(14))
@@ -407,7 +408,7 @@ class MainActivity : Activity() {
             reactor.state = when {
                 listening -> ArcReactorView.State.LISTENING
                 Speaker.speaking -> ArcReactorView.State.SPEAKING
-                Agent.running || Insights.running -> ArcReactorView.State.THINKING
+                Agent.running -> ArcReactorView.State.THINKING
                 else -> ArcReactorView.State.IDLE
             }
             reactor.level = if (listening) micLevel else Speaker.level
@@ -415,17 +416,19 @@ class MainActivity : Activity() {
             reactor.subLabel = when (reactor.state) {
                 ArcReactorView.State.LISTENING -> "Ich höre"
                 ArcReactorView.State.SPEAKING -> "Spreche"
-                ArcReactorView.State.THINKING -> when {
-                    LocalBrain.loading -> "Lade Gehirn"
-                    Insights.running -> "Analysiere"
-                    else -> "Verarbeite"
-                }
+                ArcReactorView.State.THINKING -> "Verarbeite"
                 ArcReactorView.State.IDLE -> "Online"
+            }
+            // Hat Jarvis eine Rückfrage gestellt, hört er danach von selbst zu (Antwort gehört zum selben Auftrag)
+            if (Agent.awaitingAnswer && !Agent.running && !Speaker.speaking && !listening && askedFor != Agent.questionId) {
+                askedFor = Agent.questionId
+                main.postDelayed({ if (visible && !listening && !Agent.running) listen() }, 400)
             }
             if (visible) main.postDelayed(this, 50)
         }
     }
 
+    private var askedFor = 0
     private var tickCount = 0
     private val secondTick = object : Runnable {
         override fun run() {
@@ -619,44 +622,23 @@ class MainActivity : Activity() {
 
     private fun refreshInsights() {
         insightBody.removeAllViews()
-        val (brief, tips) = Memory.insights(this)
-        if (brief.isBlank() && tips.isEmpty()) {
-            insightBody.addView(hudText(11f, Hud.CYAN_SOFT).apply {
-                text = if (Insights.running) "Analysiere Muster, Nachrichten und Möglichkeiten …"
-                else "Noch keine Analyse. Antippen, damit Jarvis selbstständig nachdenkt."
-            })
-            return
-        }
-        if (brief.isNotBlank()) insightBody.addView(hudText(12f, Hud.ICE).apply { text = brief })
-        tips.forEach { t ->
-            insightBody.addView(hudText(11f, Hud.ORANGE, true).apply { text = "◆ " + t.title.uppercase(); setPadding(0, dp(8), 0, 0) })
-            insightBody.addView(hudText(11f, Hud.ICE).apply { text = t.text })
-        }
+        insightBody.addView(hudText(11f, Hud.ICE).apply { text = Direct.briefing(this@MainActivity, fetch = false) })
     }
 
+    /** Lagebericht: regelbasiert aus Wetter, Wecker, Terminen und Meldungen – ohne KI, gratis. */
     private fun runAnalysis() {
-        if (Prefs.apiKey(this).isBlank() && !LocalBrain.available(this)) { BrainDialog.show(this); return }
-        if (Insights.running) return
-        typer.append("✦ Starte eigenständige Analyse …")
-        Thread {
-            val ok = Insights.run(applicationContext, notify = false, manual = true)
-            main.post {
-                refreshInsights(); refreshProjects()
-                if (ok) Memory.insights(this).first.takeIf { it.isNotBlank() }?.let { Speaker.say(it) }
-            }
-        }.start()
-        main.postDelayed({ refreshInsights() }, 100)
+        if (!Agent.running) Agent.start(this, "Briefing")
+        main.postDelayed({ refreshInsights() }, 2500)
     }
 
     private fun updateStatus() {
         fun dot(ok: Boolean) = if (ok) "●" else "○"
         val acc = JarvisService.instance != null
-        val local = LocalBrain.available(this)
-        val key = local || Prefs.apiKey(this).isNotBlank()
+        val key = Prefs.apiKey(this).isNotBlank()
         val wake = Prefs.wakeWord(this) && WakeWordService.running
         val msg = NotificationStore.hasAccess(this)
         val neuro = Prefs.neuralVoice(this).isNotBlank()
-        statusLine.text = "${dot(acc)} ZUGRIFF  ${dot(key)} ${if (local) "LOKAL" else "KERN"}  ${dot(wake)} WACHWORT  ${dot(msg)} KOMM  ${dot(neuro)} NEURO"
+        statusLine.text = "${dot(acc)} ZUGRIFF  ${dot(key)} CLAUDE  ${dot(wake)} WACHWORT  ${dot(msg)} KOMM  ${dot(neuro)} NEURO"
         statusLine.setTextColor(if (acc && key) Hud.CYAN else Hud.ORANGE)
     }
 
@@ -671,13 +653,20 @@ class MainActivity : Activity() {
         }
         if (!SpeechRecognizer.isRecognitionAvailable(this)) { listenFallback(); return }
         if (recognizer == null) {
-            recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply { setRecognitionListener(recListener) }
+            // Googles Erkennung versteht Deutsch (Schweiz) am besten – wenn vorhanden, gezielt wählen
+            val google = android.content.ComponentName("com.google.android.googlequicksearchbox",
+                "com.google.android.voicesearch.serviceapi.GoogleRecognitionService")
+            usingGoogle = preferGoogle && try { packageManager.getServiceInfo(google, 0); true } catch (e: Exception) { false }
+            recognizer = (if (usingGoogle) SpeechRecognizer.createSpeechRecognizer(this, google)
+                          else SpeechRecognizer.createSpeechRecognizer(this)).apply { setRecognitionListener(recListener) }
         }
+        val lang = Prefs.sttLang(this)
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "de-CH")
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lang)
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
         WakeWordService.pause(this)
         listening = true
         transcript.text = "…"
@@ -701,13 +690,22 @@ class MainActivity : Activity() {
             transcript.text = when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Nichts verstanden. Tippe nochmals auf den Reaktor."
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mikrofon-Berechtigung fehlt."
-                else -> "Spracherkennung nicht bereit (Fehler $error)."
+                else -> "Spracherkennung nicht bereit (Fehler $error). Tippe nochmals."
+            }
+            // Klappt die gezielt gewählte Google-Erkennung nicht, beim nächsten Mal die Standard-Erkennung nehmen
+            if (usingGoogle && error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                preferGoogle = false
+                try { recognizer?.destroy() } catch (_: Exception) {}
+                recognizer = null
             }
             WakeWordService.resume(this@MainActivity)
         }
         override fun onResults(results: Bundle?) {
             listening = false; micLevel = 0f
-            val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+            val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().filter { it.isNotBlank() }
+            // Von mehreren Hör-Varianten die nehmen, die Jarvis als klaren Befehl versteht
+            val text = list.take(4).firstOrNull { try { ch.lirim.jarvis.core.Intents.parse(it) != null } catch (e: Exception) { false } }
+                ?: list.firstOrNull()
             if (!text.isNullOrBlank()) {
                 transcript.text = "«$text»"
                 run(text)
@@ -724,7 +722,7 @@ class MainActivity : Activity() {
     private fun listenFallback() {
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "de-CH")
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Prefs.sttLang(this))
         try {
             @Suppress("DEPRECATION")
             startActivityForResult(i, REQ_SPEECH)
@@ -755,11 +753,7 @@ class MainActivity : Activity() {
     }
 
     private fun run(cmd: String) {
-        if (Prefs.apiKey(this).isBlank() && !LocalBrain.available(this)) {
-            Toast.makeText(this, "Bitte zuerst den API-Schlüssel eintragen.", Toast.LENGTH_LONG).show()
-            showSettings()
-            return
-        }
+        // Direktbefehle (Wecker, Anruf, Nachricht …) laufen auch ohne API-Schlüssel
         Agent.start(this, cmd)
     }
 
@@ -865,14 +859,14 @@ class MainActivity : Activity() {
         val auto = cb("Beim Öffnen sofort zuhören", Prefs.autoListen(this))
         val bubble = cb("Schwebenden Knopf anzeigen", Prefs.bubble(this))
         val wake = cb("Auf «Hallo Jarvis» hören (immer an)", Prefs.wakeWord(this))
-        val web = cb("Websuche erlauben", Prefs.webSearch(this))
-        val pro = cb("Eigenständig nachdenken & Tipps senden (alle 3 h)", Prefs.proactive(this))
+        val web = cb("Websuche erlauben (≈ 1 Rp. pro Suche; nur wenn du «im Internet» sagst)", Prefs.webSearch(this))
+        val hd = cb("Spracherkennung auf Hochdeutsch (de-DE) statt Schweiz (de-CH)", Prefs.sttLang(this) == "de-DE")
 
         box.addView(label("Claude-API-Schlüssel")); box.addView(key)
         box.addView(label("Modell")); box.addView(model)
         box.addView(label("Ort fürs Wetter")); box.addView(city)
         box.addView(label("Börsen-Watchlist (Yahoo-Symbole, Komma)")); box.addView(watch)
-        listOf(auto, bubble, wake, web, pro).forEach { box.addView(it) }
+        listOf(auto, bubble, wake, web, hd).forEach { box.addView(it) }
 
         AlertDialog.Builder(this)
             .setTitle("System")
@@ -886,9 +880,10 @@ class MainActivity : Activity() {
                 Prefs.setBubble(this, bubble.isChecked)
                 Prefs.setWebSearch(this, web.isChecked)
                 Prefs.setWakeWord(this, wake.isChecked)
-                Prefs.setProactive(this, pro.isChecked)
+                Prefs.setSttLang(this, if (hd.isChecked) "de-DE" else "de-CH")
+                try { recognizer?.destroy() } catch (_: Exception) {}
+                recognizer = null
                 applyWakeWord()
-                Insights.schedule(this)
                 JarvisService.instance?.overlay?.let { if (bubble.isChecked) it.showBubble() else it.hideBubble() }
                 updateStatus()
                 refreshNet(force = true)

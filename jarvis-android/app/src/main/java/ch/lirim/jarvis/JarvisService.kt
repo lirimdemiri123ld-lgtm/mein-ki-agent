@@ -44,7 +44,39 @@ class JarvisService : AccessibilityService() {
         ) WakeWordService.start(this)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    @Volatile private var lastEvent = 0L
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) { lastEvent = android.os.SystemClock.uptimeMillis() }
+
+    /** Wartet, bis sich der Bildschirm beruhigt hat (statt fester Pausen): schneller und zuverlässiger. */
+    fun waitSettled(maxMs: Long = 2500, quietMs: Long = 450) {
+        val start = android.os.SystemClock.uptimeMillis()
+        Thread.sleep(250)
+        while (android.os.SystemClock.uptimeMillis() - start < maxMs) {
+            if (android.os.SystemClock.uptimeMillis() - lastEvent >= quietMs) return
+            Thread.sleep(60)
+        }
+    }
+
+    /** Klickbares Element, dessen Beschriftung auf das Muster passt (oder dessen ID so endet). */
+    fun findClickable(label: Regex, idSuffix: String = ""): Int? {
+        readScreen()
+        synchronized(nodes) {
+            return nodes.entries.sortedBy { it.key }.firstOrNull { (_, n) ->
+                val l = ((n.contentDescription ?: "").toString() + " " + (n.text ?: "").toString()).trim()
+                val idOk = idSuffix.isNotEmpty() && (n.viewIdResourceName ?: "").endsWith("/$idSuffix")
+                n.isClickable && n.isEnabled && ((l.isNotEmpty() && label.containsMatchIn(l)) || idOk)
+            }?.key
+        }
+    }
+
+    /** Inhalt des (ersten) Eingabefelds auf dem Bildschirm. */
+    fun editText(): String? {
+        readScreen()
+        synchronized(nodes) {
+            return nodes.entries.sortedBy { it.key }.firstOrNull { it.value.isEditable }?.value?.text?.toString()
+        }
+    }
     override fun onInterrupt() {}
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -66,11 +98,13 @@ class JarvisService : AccessibilityService() {
         synchronized(nodes) {
             nodes.clear()
             val roots = mutableListOf<AccessibilityNodeInfo>()
+            var keyboard = false
             try {
                 for (w in windows) {
+                    // Die Tastatur (≈ 40 Tasten) wird nicht mitgeschickt – spart bei jedem Schritt viele Tokens
+                    if (w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) { keyboard = true; continue }
                     val keep = when (w.type) {
-                        AccessibilityWindowInfo.TYPE_APPLICATION,
-                        AccessibilityWindowInfo.TYPE_INPUT_METHOD -> true
+                        AccessibilityWindowInfo.TYPE_APPLICATION -> true
                         AccessibilityWindowInfo.TYPE_SYSTEM -> w.isActive || w.isFocused
                         else -> false
                     }
@@ -93,6 +127,7 @@ class JarvisService : AccessibilityService() {
                 if (rp != pkg) sb.append("--- Fenster: ").append(Apps.labelFor(this, rp)).append(" ---\n")
                 walk(r, sb)
             }
+            if (keyboard) sb.append("(Tastatur ist offen)\n")
             if (nodes.isEmpty()) {
                 sb.append("(Keine lesbaren Elemente. Nutze screenshot und tippen_xy.)\n")
             } else if (nodes.size >= MAX_NODES) {

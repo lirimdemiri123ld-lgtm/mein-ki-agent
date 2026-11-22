@@ -96,12 +96,37 @@ object NeuralVoiceDialog {
         else "Guten Abend, Lirim. Alle Systeme sind bereit. Wie kann ich helfen?"
 
     private fun askDownload(a: Activity, v: NeuralVoices.VoiceInfo) {
-        AlertDialog.Builder(a)
+        val b = AlertDialog.Builder(a)
             .setTitle(v.title)
-            .setMessage("Diese Stimme herunterladen (ca. ${v.mb()} MB)? Am besten im WLAN.")
+            .setMessage("Diese Stimme herunterladen (ca. ${v.mb()} MB)? Am besten im WLAN.\n\nMit «Vorhören» hörst du zuerst eine kurze Probe.")
             .setPositiveButton("Herunterladen") { _, _ -> download(a, v, sample(v)) }
             .setNegativeButton("Abbrechen", null)
-            .show()
+        if (v.sample.isNotBlank()) b.setNeutralButton("▶ Vorhören") { _, _ -> playSample(a, v.sample); askDownload(a, v) }
+        b.show()
+    }
+
+    private var player: android.media.MediaPlayer? = null
+
+    /** Spielt eine kurze Hörprobe aus dem Netz, bevor man die Stimme lädt. */
+    private fun playSample(a: Activity, url: String) {
+        try { player?.release() } catch (_: Exception) {}
+        Speaker.stop()
+        Toast.makeText(a, "Lade Hörprobe …", Toast.LENGTH_SHORT).show()
+        player = try {
+            android.media.MediaPlayer().apply {
+                setAudioAttributes(android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                setDataSource(url)
+                setOnPreparedListener { it.start() }
+                setOnCompletionListener { it.release(); player = null }
+                setOnErrorListener { mp, _, _ ->
+                    Toast.makeText(a, "Hörprobe nicht verfügbar.", Toast.LENGTH_SHORT).show()
+                    mp.release(); player = null; true
+                }
+                prepareAsync()
+            }
+        } catch (e: Exception) { null }
     }
 
     private fun download(a: Activity, v: NeuralVoices.VoiceInfo, sampleText: String) {

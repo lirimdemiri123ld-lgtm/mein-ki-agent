@@ -77,21 +77,10 @@ jobs:
           curl -sSL -o v.tar.bz2 "$U" && mkdir -p vt && tar xjf v.tar.bz2 -C vt
           python3 jarvis-android/tools/tts_test.py "$(ls -d vt/*/ | head -1)"
 
-      - name: Schnelltest Logik (Namenssuche, Router)
+      - name: Unit-Tests (Befehls-Erkennung, Uhrzeiten, Nachrichtentexte)
         continue-on-error: true
-        working-directory: jarvis-android/tools/localtest
-        run: gradle run --no-daemon -q --args="x x $GITHUB_WORKSPACE/jarvis-android/app/src/main/assets/local_tools.json nurlogik" 2>&1 | tail -25
-
-      - name: Test lokales Gehirn (Gemma 4 E2B + E4B, simuliertes Handy)
-        if: contains(github.event.head_commit.message, '[gehirntest]')
-        continue-on-error: true
-        working-directory: jarvis-android/tools/localtest
-        run: |
-          curl -sSL -o /tmp/e2b.litertlm "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/6e5c4f1e395deb959c494953478fa5cec4b8008f/gemma-4-E2B-it.litertlm?download=true" &
-          curl -sSL -o /tmp/e4b.litertlm "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/28299f30ee4d43294517a4ac93abd6163412f07f/gemma-4-E4B-it.litertlm?download=true" &
-          wait
-          ls -la /tmp/*.litertlm
-          gradle run --no-daemon -q --args="/tmp/e2b.litertlm /tmp/e4b.litertlm $GITHUB_WORKSPACE/jarvis-android/app/src/main/assets/local_tools.json" 2>&1 | tail -80
+        working-directory: jarvis-android
+        run: gradle testReleaseUnitTest --no-daemon -q 2>&1 | tail -40
 
       - name: APK bauen
         working-directory: jarvis-android

@@ -59,7 +59,7 @@ class HudPanel(c: Context, title: String) : LinearLayout(c) {
     }
 
     override fun onDraw(c: Canvas) {
-        t += 0.016f
+        t += 0.4f
         val w = width.toFloat(); val h = height.toFloat()
         val k = 12 * dp
         rect.set(0f, 0f, w, h)
@@ -70,14 +70,10 @@ class HudPanel(c: Context, title: String) : LinearLayout(c) {
         c.drawLine(w, 0f, w - k, 0f, corner); c.drawLine(w, 0f, w, k, corner)
         c.drawLine(0f, h, k, h, corner); c.drawLine(0f, h, 0f, h - k, corner)
         c.drawLine(w, h, w - k, h, corner); c.drawLine(w, h, w, h - k, corner)
-        // Glanz, der über das Panel läuft
-        val sx = ((t * 0.35f) % 1.6f - 0.3f) * w
-        shine.shader = LinearGradient(sx - 60 * dp, 0f, sx, 0f, 0x0000D4FF, 0x2200D4FF, Shader.TileMode.CLAMP)
-        c.drawRect(max(0f, sx - 60 * dp), 0f, sx.coerceAtMost(w), h, shine)
-        // LED
+        // Status-LED blinkt ruhig: 1× pro Sekunde neu zeichnen statt 30× (pro Panel!) – hält das Handy kühl
         led.alpha = (140 + 115 * sin(t * 4)).toInt().coerceIn(0, 255)
         c.drawCircle(w - 12 * dp, 14 * dp, 3.5f * dp, led)
-        postInvalidateDelayed(33)
+        postInvalidateDelayed(1000)
     }
 
     /** Zeile «Bezeichnung …… Wert». */
@@ -116,14 +112,16 @@ class Sparkline(c: Context, private val color: Int = Hud.CYAN) : View(c) {
         values.addLast(v)
         while (values.size > maxPoints) values.removeFirst()
         scroll = 1f
+        invalidate()
     }
 
     fun set(list: List<Float>) {
         values.clear(); list.takeLast(maxPoints).forEach { values.addLast(it) }
+        invalidate()
     }
 
     override fun onDraw(c: Canvas) {
-        if (values.size < 2) { postInvalidateDelayed(33); return }
+        if (values.size < 2) return
         scroll = Hud.ease(scroll, 0f, 0.08f)
         val w = width.toFloat(); val h = height.toFloat()
         val mx = fixedMax ?: (values.maxOrNull() ?: 1f)
@@ -143,7 +141,7 @@ class Sparkline(c: Context, private val color: Int = Hud.CYAN) : View(c) {
         path.close()
         area.shader = LinearGradient(0f, 0f, 0f, h, (color and 0x00FFFFFF) or 0x55000000, color and 0x00FFFFFF, Shader.TileMode.CLAMP)
         c.drawPath(path, area)
-        postInvalidateDelayed(33)
+        if (scroll > 0.02f) postInvalidateDelayed(33)   // nur während der kurzen Einlauf-Animation
     }
 }
 
@@ -204,13 +202,13 @@ class TypewriterLog(private val tv: TextView, private val onChange: () -> Unit) 
     private fun tick() {
         if (queue.isEmpty()) { running = false; return }
         running = true
-        val n = if (queue.length > 200) 12 else 3
+        val n = if (queue.length > 200) 40 else 8
         val chunk = queue.substring(0, minOf(n, queue.length))
         queue.delete(0, chunk.length)
         tv.append(chunk)
         if (tv.text.length > 8000) tv.text = tv.text.subSequence(tv.text.length - 6000, tv.text.length)
         onChange()
-        h.postDelayed({ tick() }, 12)
+        h.postDelayed({ tick() }, 30)
     }
 }
 

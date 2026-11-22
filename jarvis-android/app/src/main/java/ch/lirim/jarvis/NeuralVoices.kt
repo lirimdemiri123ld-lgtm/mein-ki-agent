@@ -23,7 +23,7 @@ import kotlin.math.sqrt
  * Katalog liegt in assets/voices.json, Stimmen werden bei Bedarf heruntergeladen.
  */
 object NeuralVoices {
-    data class VoiceInfo(val id: String, val title: String, val lang: String, val url: String, val sizeMb: Int)
+    data class VoiceInfo(val id: String, val title: String, val lang: String, val url: String, val sizeMb: Int, val sample: String = "")
 
     private var catalog: List<VoiceInfo>? = null
     private var tts: OfflineTts? = null
@@ -35,7 +35,7 @@ object NeuralVoices {
             val a = JSONArray(c.assets.open("voices.json").bufferedReader().use { it.readText() })
             (0 until a.length()).map {
                 val o = a.getJSONObject(it)
-                VoiceInfo(o.getString("id"), o.getString("title"), o.getString("lang"), o.getString("url"), o.optInt("mb"))
+                VoiceInfo(o.getString("id"), o.getString("title"), o.getString("lang"), o.getString("url"), o.optInt("mb"), o.optString("sample"))
             }
         } catch (e: Exception) {
             emptyList()

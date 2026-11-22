@@ -282,7 +282,8 @@ object Tools {
     }
 
     private fun after(svc: JarvisService?, msg: String, delayMs: Long = 900): ToolOutput {
-        if (delayMs > 0) Thread.sleep(delayMs)
+        // Statt fester Pause warten, bis sich der Bildschirm beruhigt hat
+        if (delayMs > 0) { if (svc != null) svc.waitSettled(delayMs + 1500) else Thread.sleep(delayMs) }
         val screen = svc?.readScreen() ?: "(Bildschirm nicht lesbar – Bedienungshilfe ist aus.)"
         return ToolOutput("$msg\n\nAktueller Bildschirm:\n$screen")
     }
