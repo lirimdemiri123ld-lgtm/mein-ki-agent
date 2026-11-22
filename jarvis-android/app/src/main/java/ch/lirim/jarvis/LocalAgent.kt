@@ -58,6 +58,7 @@ object LocalAgent {
     private fun system(c: Context, complex: Boolean): String {
         val now = SimpleDateFormat("EEEE, d. MMMM yyyy, HH:mm", Locale.GERMAN).format(Date())
         val memory = Memory.promptBlock(c).take(1500).trim()
+        val people = ch.lirim.jarvis.core.People.promptLines(Memory.factTexts(c))
         return """
 Du bist Jarvis, Lirims persönlicher KI-Assistent auf seinem Samsung Galaxy S25. Du läufst lokal auf dem Handy.
 Antworte immer auf Deutsch (Schweiz, «ss» statt «ß»), kurz, natürlich, souverän, mit feinem Humor. Kein Markdown.
@@ -73,16 +74,19 @@ ${if (complex) "- Arbeite den Plan ab. Ist ein Schritt erledigt: schritt_erledig
 - Das Hintergrundwissen unten nutzt du still. Erwähne es nur, wenn es passt.
 - Nie Passwörter oder PINs.
 Jetzt: $now.
-""".trimIndent() + if (memory.isNotEmpty()) "\n\nHintergrundwissen über Lirim:\n$memory" else ""
+""".trimIndent() + (if (people.isNotEmpty()) "\n\nWICHTIGE PERSONEN (nutze diese Namen für anrufen/schreiben):\n$people" else "") +
+            (if (memory.isNotEmpty()) "\n\nHintergrundwissen über Lirim:\n$memory" else "")
     }
 
     fun run(c: Context, command: String, hybrid: Boolean, shouldStop: () -> Boolean, say: (String) -> Unit): Result {
         val complex = TaskLogic.isComplex(command)
-        var model = LocalBrain.pick(c, complex) ?: return Result.FAILED.also { lastError = "Kein Modell installiert." }
+        // Einfache Fragen → schnell; alles mit Handy-Aktion → schlaues Modell (wenn vorhanden)
+        val wantBig = complex || !TaskLogic.isChatOnly(command)
+        var model = LocalBrain.pick(c, wantBig) ?: return Result.FAILED.also { lastError = "Kein Modell installiert." }
         if (complex && !LocalBrain.isBig(model) && LocalBrain.ensureBigDownloaded(c)) {
             Agent.log("🧠 Lade mir im Hintergrund ein grösseres Gehirn (${LocalBrain.big.gb}) für solche Aufgaben.")
         }
-        Agent.log("🧠 ${if (complex) "Komplexer Auftrag" else "Einfacher Auftrag"} → ${model.title.substringBefore(" ·")}")
+        Agent.log("🧠 ${if (complex) "Komplexer Auftrag" else if (wantBig) "Aktion" else "Frage"} → ${model.title.substringBefore(" ·")}")
         var r = attempt(c, model, command, complex, hybrid, shouldStop, say)
         // Kleines Modell gescheitert → grosses versuchen
         if ((r == Result.FAILED || r == Result.ESCALATE) && !LocalBrain.isBig(model) &&
@@ -164,6 +168,20 @@ Jetzt: $now.
             }
             textStreak = 0
             val input = JSONObject(args.filterValues { it != null })
+            // Personen deterministisch auflösen («meine Frau» → Name aus dem Gedächtnis)
+            val personKey = when (tool) { "anrufen" -> "wen"; "kontakt_suchen" -> "name"; "tippen" -> "text"; else -> null }
+            if (personKey != null && (tool != "tippen" || input.has("text"))) {
+                val cur = input.optString(personKey).takeIf { it != "null" } ?: ""
+                if (ch.lirim.jarvis.core.People.isRelational(cur)) {
+                    val who = ch.lirim.jarvis.core.People.resolve(cur.ifBlank { command }, Memory.factTexts(c))
+                        ?: ch.lirim.jarvis.core.People.resolve(command, Memory.factTexts(c))
+                    if (who != null) { input.put(personKey, who); Agent.log("👤 «${cur.ifBlank { "?" }}» → $who") }
+                    else if (cur.isBlank() && tool == "anrufen") {
+                        // Name direkt aus dem Satz nehmen («Ruf Ali an»)
+                        Regex("""(?i)ruf\s+(.+?)\s+an\b""").find(command)?.groupValues?.get(1)?.let { input.put(personKey, it) }
+                    }
+                }
+            }
             Agent.log("→ [${model.title.substringBefore(" ·").substringAfter("Gemma 4 ")}] $tool $input")
 
             // Schleifen-Schutz

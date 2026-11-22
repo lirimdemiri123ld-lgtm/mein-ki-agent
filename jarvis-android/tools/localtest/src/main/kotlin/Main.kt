@@ -92,6 +92,11 @@ Hintergrundwissen über Lirim:
     println("=== Fuzzy")
     for ((q, l) in listOf("gruya" to "Gruja", "gruja" to "Gruja Demiri", "schukrie" to "Shukrije", "ali" to "Ali Bellikaya", "baba" to "Baba Swisscom", "gruya" to "Grubenmann AG", "sebastian" to "Sebastian Lorenzen", "ingmar" to "Ingrid Muster"))
         println("  $q ~ $l = ${ch.lirim.jarvis.core.Fuzzy.score(q, l)}")
+    println("=== Personen")
+    val facts = listOf("gruya ist meine Frau", "Baba = Kontakt «Baba Swisscom» (Vater)", "Mein Chef ist Sebastian Lorenzen", "Ali ist mein Teamleiter")
+    println("  Relationen: ${ch.lirim.jarvis.core.People.relations(facts)}")
+    for (t in listOf("Ruf meine Frau an", "ruf meiner frau an", "Schreib meinem Chef", "Ruf Baba an", "ruf meinen Teamleiter an", "Ruf Ali an", "meine Frau"))
+        println("  «$t» → ${ch.lirim.jarvis.core.People.resolve(t, facts)}   chatOnly=${TaskLogic.isChatOnly(t)}")
     println("=== Router")
     for (c in listOf("Wie geht es dir?", "Öffne WhatsApp", "Ruf meine Frau an", "Stell einen Wecker um 7",
         "Schreib Ali auf WhatsApp, dass ich 10 Minuten später komme", "Fass meine ungelesenen Outlook-Mails zusammen",

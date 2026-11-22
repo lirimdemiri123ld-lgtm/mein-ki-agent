@@ -257,6 +257,9 @@ object Memory {
 
     fun skillCount(c: Context): Int { load(c); return skills.size }
 
+    @Synchronized
+    fun factTexts(c: Context): List<String> { load(c); return facts.map { it.text } }
+
     /** Text für den System-Prompt. */
     @Synchronized
     fun promptBlock(c: Context): String {

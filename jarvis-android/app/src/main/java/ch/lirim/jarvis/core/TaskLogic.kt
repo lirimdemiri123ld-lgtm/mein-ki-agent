@@ -18,6 +18,16 @@ object TaskLogic {
     private val simpleStarts = listOf("wie ", "was ", "wer ", "warum ", "wieso ", "weshalb ", "wann ", "erzähl", "erklär", "hallo", "hi ", "danke")
     private val simpleActions = listOf("öffne ", "starte ", "wecker", "timer", "ruf ", "anrufen", "merk dir", "vergiss")
 
+    /** Reine Frage/Plauderei ohne Handy-Aktion → schnelles Modell genügt. */
+    fun isChatOnly(command: String): Boolean {
+        val c = command.lowercase().trim()
+        val action = listOf("öffne", "starte", "ruf", "anruf", "schreib", "schick", "send", "stell", "wecker", "timer",
+            "merk", "vergiss", "such", "spiel", "zeig", "lies", "les ", "mach", "tipp", "geh ", "buch", "bestell",
+            "navigier", "fahr", "whatsapp", "mail", "kalender", "termin", "nachricht", "projekt")
+        if (action.any { c.contains(it) }) return false
+        return true
+    }
+
     /** true = mehrschrittige Aufgabe → Planen + grosses Gehirn. */
     fun isComplex(command: String): Boolean {
         val c = " " + command.lowercase().trim() + " "
