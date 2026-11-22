@@ -77,6 +77,11 @@ jobs:
           curl -sSL -o v.tar.bz2 "$U" && mkdir -p vt && tar xjf v.tar.bz2 -C vt
           python3 jarvis-android/tools/tts_test.py "$(ls -d vt/*/ | head -1)"
 
+      - name: Schnelltest Logik (Namenssuche, Router)
+        continue-on-error: true
+        working-directory: jarvis-android/tools/localtest
+        run: gradle run --no-daemon -q --args="x x $GITHUB_WORKSPACE/jarvis-android/app/src/main/assets/local_tools.json nurlogik" 2>&1 | tail -25
+
       - name: Test lokales Gehirn (Gemma 4 E2B + E4B, simuliertes Handy)
         if: contains(github.event.head_commit.message, '[gehirntest]')
         continue-on-error: true

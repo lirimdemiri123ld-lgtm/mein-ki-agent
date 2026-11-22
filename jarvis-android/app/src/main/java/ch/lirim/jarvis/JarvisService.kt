@@ -161,10 +161,8 @@ class JarvisService : AccessibilityService() {
         fun label(n: AccessibilityNodeInfo) =
             ((n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")).lowercase()
         val all = synchronized(nodes) { nodes.entries.toList() }
-        val hit = all.firstOrNull { label(it.value).trim() == q }
-            ?: all.firstOrNull { label(it.value).split(" ").any { w -> w == q } }
-            ?: all.firstOrNull { label(it.value).contains(q) }
-            ?: all.firstOrNull { q.split(" ").filter { w -> w.length > 2 }.let { ws -> ws.isNotEmpty() && ws.all { w -> label(it.value).contains(w) } } }
+        val hit = all.map { it to ch.lirim.jarvis.core.Fuzzy.score(q, label(it.value)) }
+            .filter { it.second >= 55 }.maxByOrNull { it.second }?.first
         if (hit != null) return tap(hit.key).replace("[${hit.key}]", "«${query.trim()}» [${hit.key}]")
         val found = rootInActiveWindow?.findAccessibilityNodeInfosByText(query.trim())?.firstOrNull()
             ?: return "Kein Element mit «${query.trim()}» auf dem Bildschirm. Evtl. scrollen oder suchen."

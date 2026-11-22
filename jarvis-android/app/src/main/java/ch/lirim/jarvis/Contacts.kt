@@ -37,17 +37,14 @@ object Contacts {
         val words = q.split(" ").filter { it.length >= 2 }
         fun score(h: Hit): Int {
             val n = norm(h.name)
-            return when {
-                n == q -> 100
-                n.startsWith(q) -> 80
-                n.split(" ").any { it == q } -> 70
-                n.contains(q) -> 50
+            val fuzzy = ch.lirim.jarvis.core.Fuzzy.score(q, h.name)
+            return maxOf(fuzzy, when {
                 words.isNotEmpty() && words.all { n.contains(it) } -> 40
                 words.any { w -> n.split(" ").any { it.startsWith(w.take(4)) } } -> 20
                 else -> 0
-            }
+            })
         }
-        return all.map { it to score(it) }.filter { it.second > 0 }
+        return all.map { it to score(it) }.filter { it.second >= 20 }
             .sortedByDescending { it.second }.map { it.first }.distinctBy { it.number.filter(Char::isDigit) }.take(limit)
     }
 

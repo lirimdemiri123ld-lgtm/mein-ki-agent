@@ -89,6 +89,9 @@ Hintergrundwissen über Lirim:
 - Ali = Ali Bellikaya, Teamleiter
 """.trimIndent()
 
+    println("=== Fuzzy")
+    for ((q, l) in listOf("gruya" to "Gruja", "gruja" to "Gruja Demiri", "schukrie" to "Shukrije", "ali" to "Ali Bellikaya", "baba" to "Baba Swisscom", "gruya" to "Grubenmann AG", "sebastian" to "Sebastian Lorenzen", "ingmar" to "Ingrid Muster"))
+        println("  $q ~ $l = ${ch.lirim.jarvis.core.Fuzzy.score(q, l)}")
     println("=== Router")
     for (c in listOf("Wie geht es dir?", "Öffne WhatsApp", "Ruf meine Frau an", "Stell einen Wecker um 7",
         "Schreib Ali auf WhatsApp, dass ich 10 Minuten später komme", "Fass meine ungelesenen Outlook-Mails zusammen",
@@ -96,6 +99,7 @@ Hintergrundwissen über Lirim:
         println("  ${if (TaskLogic.isComplex(c)) "KOMPLEX" else "einfach"}  $c")
 
     Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
+    if (args.size > 3) return
     for ((label, path) in listOf("E4B" to args[1], "E2B" to args[0])) {
         Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = "/tmp")).use { e ->
             e.initialize()
