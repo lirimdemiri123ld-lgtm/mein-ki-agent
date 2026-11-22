@@ -33,8 +33,8 @@ object Tools {
         a.put(tool("apps_auflisten", "Listet alle installierten Apps mit Namen auf."))
         a.put(tool("bildschirm_lesen", "Liest den aktuellen Bildschirm als nummerierte Liste von Elementen [id]."))
         a.put(tool("screenshot", "Macht ein Bild vom Bildschirm. Nutzen, wenn die Elementliste leer/unklar ist."))
-        a.put(tool("tippen", "Tippt auf ein Element aus der Bildschirmliste.",
-            JSONObject().put("id", prop("integer", "Nummer des Elements")), listOf("id")))
+        a.put(tool("tippen", "Tippt auf ein Element: per Nummer (id) aus der Bildschirmliste ODER per sichtbarem Text.",
+            JSONObject().put("id", prop("integer", "Nummer des Elements")).put("text", prop("string", "sichtbarer Text, z. B. Name eines Chats"))))
         a.put(tool("tippen_xy", "Tippt auf Bildschirm-Koordinaten in echten Pixeln.",
             JSONObject().put("x", prop("number", "x in px")).put("y", prop("number", "y in px")), listOf("x", "y")))
         a.put(tool("lange_druecken", "Drückt lange auf ein Element.",
@@ -166,7 +166,15 @@ object Tools {
                     if (img == null) ToolOutput("Screenshot nicht möglich (diese App blockiert Bildschirmaufnahmen).")
                     else ToolOutput(svc.lastShotInfo, img)
                 }
-                "tippen" -> after(svc, svc!!.tap(input.getInt("id")))
+                "tippen" -> {
+                    val id = input.opt("id").let { (it as? Number)?.toInt() ?: it?.toString()?.toIntOrNull() }
+                    val txt = input.optString("text").takeIf { it.isNotBlank() && it != "null" }
+                    when {
+                        id != null -> after(svc, svc!!.tap(id))
+                        txt != null -> after(svc, svc!!.tapText(txt))
+                        else -> ToolOutput("Fehler: Gib id (Nummer aus der Liste) oder text (sichtbarer Text) an.")
+                    }
+                }
                 "tippen_xy" -> {
                     val ok = svc!!.tapXY(input.getDouble("x").toFloat(), input.getDouble("y").toFloat())
                     after(svc, if (ok) "Getippt." else "Tippen fehlgeschlagen.")

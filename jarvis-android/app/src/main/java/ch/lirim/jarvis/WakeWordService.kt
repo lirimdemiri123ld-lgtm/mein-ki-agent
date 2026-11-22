@@ -150,14 +150,13 @@ class WakeWordService : Service(), RecognitionListener {
     }
 
     private fun triggered() {
+        // Während Jarvis arbeitet oder spricht: nicht unterbrechen (Fehlauslöser vermeiden)
+        if (Agent.running || Speaker.speaking) return
         paused = true
         main.post {
             // Mikrofon freigeben, damit die Spracheingabe es nutzen kann
             stopListening()
             updateText("Ich höre zu …")
-            if (Agent.running) {
-                Agent.stop()
-            }
             val i = Intent(this, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra(MainActivity.EXTRA_LISTEN, true)

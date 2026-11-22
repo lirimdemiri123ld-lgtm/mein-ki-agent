@@ -25,18 +25,19 @@
  },
  {
   "name": "tippen",
-  "description": "Tippt auf ein Element der Bildschirmliste.",
+  "description": "Tippt auf ein Element: per Nummer (id) aus der Bildschirmliste ODER per sichtbarem Text (text), z. B. den Namen eines Chats.",
   "parameters": {
    "type": "object",
    "properties": {
     "id": {
      "type": "integer",
      "description": "Nummer des Elements"
+    },
+    "text": {
+     "type": "string",
+     "description": "sichtbarer Text des Elements"
     }
-   },
-   "required": [
-    "id"
-   ]
+   }
   }
  },
  {

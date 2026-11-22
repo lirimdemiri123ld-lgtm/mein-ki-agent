@@ -153,6 +153,28 @@ class JarvisService : AccessibilityService() {
         else "Tippen auf [$id] fehlgeschlagen."
     }
 
+    /** Tippt auf das Element mit diesem sichtbaren Text (oder Beschreibung). */
+    fun tapText(query: String): String {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) return "Fehler: Kein Text angegeben."
+        if (nodes.isEmpty()) readScreen()
+        fun label(n: AccessibilityNodeInfo) =
+            ((n.text?.toString() ?: "") + " " + (n.contentDescription?.toString() ?: "")).lowercase()
+        val all = synchronized(nodes) { nodes.entries.toList() }
+        val hit = all.firstOrNull { label(it.value).trim() == q }
+            ?: all.firstOrNull { label(it.value).split(" ").any { w -> w == q } }
+            ?: all.firstOrNull { label(it.value).contains(q) }
+            ?: all.firstOrNull { q.split(" ").filter { w -> w.length > 2 }.let { ws -> ws.isNotEmpty() && ws.all { w -> label(it.value).contains(w) } } }
+        if (hit != null) return tap(hit.key).replace("[${hit.key}]", "«${query.trim()}» [${hit.key}]")
+        val found = rootInActiveWindow?.findAccessibilityNodeInfosByText(query.trim())?.firstOrNull()
+            ?: return "Kein Element mit «${query.trim()}» auf dem Bildschirm. Evtl. scrollen oder suchen."
+        var c: AccessibilityNodeInfo? = found
+        while (c != null && !c.isClickable) c = c.parent
+        if (c != null && c.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return "Auf «${query.trim()}» getippt."
+        val r = Rect(); found.getBoundsInScreen(r)
+        return if (tapXY(r.centerX().toFloat(), r.centerY().toFloat())) "Auf «${query.trim()}» getippt." else "Tippen auf «${query.trim()}» fehlgeschlagen."
+    }
+
     fun longPress(id: Int): String {
         val n = node(id) ?: return "Fehler: Element $id nicht gefunden."
         var c: AccessibilityNodeInfo? = n

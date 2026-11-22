@@ -251,7 +251,7 @@ object LocalBrain {
 
     /** Ein Agenten-Schritt: das Modell wählt höchstens ein Werkzeug. Optional mit Bildschirmfoto. */
     fun step(c: Context, m: Model, system: String, prompt: String, toolsJson: List<String>, image: ByteArray? = null): Step =
-        exclusive(c, m, 20_000, 90_000) { e ->
+        exclusive(c, m, 20_000, if (isBig(m)) 180_000 else 90_000) { e ->
             val providers = toolsJson.map { j ->
                 tool(object : OpenApiTool {
                     override fun getToolDescriptionJsonString() = j
