@@ -166,7 +166,7 @@ class WakeWordService : Service(), RecognitionListener {
 
     private fun triggered() {
         // Während Jarvis arbeitet oder spricht: nicht unterbrechen (Fehlauslöser vermeiden)
-        if (Agent.running || Speaker.speaking) return
+        if (Agent.running || Speaker.speaking || Contacts.inCall(this)) return
         paused = true
         main.post {
             // Mikrofon freigeben, damit die Spracheingabe es nutzen kann

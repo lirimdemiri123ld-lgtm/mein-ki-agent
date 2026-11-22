@@ -5,10 +5,33 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Bundle
 import android.provider.ContactsContract
 
 /** Kontakte suchen und anrufen. */
 object Contacts {
+    /** Läuft der Anruf wirklich? (Audio-Modus wechselt auf «Anruf», oder eine SIM-Auswahl erscheint) */
+    private fun waitForCall(c: Context): Boolean {
+        val am = c.getSystemService(android.media.AudioManager::class.java)
+        repeat(12) {
+            Thread.sleep(400)
+            val m = am.mode
+            if (m == android.media.AudioManager.MODE_IN_CALL || m == android.media.AudioManager.MODE_IN_COMMUNICATION ||
+                m == android.media.AudioManager.MODE_RINGTONE || m == android.media.AudioManager.MODE_CALL_SCREENING) return true
+            // Samsung: Telefon-App/SIM-Auswahl ist im Vordergrund → zählt als gestartet
+            val pkg = JarvisService.instance?.rootInActiveWindow?.packageName?.toString().orEmpty()
+            if (pkg.contains("incallui") || pkg.contains("telecom") || pkg.contains("dialer")) return true
+        }
+        return false
+    }
+
+    /** Wird gerade telefoniert? (dann nicht zuhören) */
+    fun inCall(c: Context): Boolean {
+        val m = c.getSystemService(android.media.AudioManager::class.java).mode
+        return m == android.media.AudioManager.MODE_IN_CALL || m == android.media.AudioManager.MODE_IN_COMMUNICATION ||
+            m == android.media.AudioManager.MODE_RINGTONE
+    }
+
     data class Hit(val name: String, val number: String)
 
     fun canRead(c: Context) = c.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
@@ -79,8 +102,23 @@ object Contacts {
                 else "Kein Kontakt «$t» gefunden."
             number = hit.number; label = hit.name
         }
-        val action = if (canCall(c)) Intent.ACTION_CALL else Intent.ACTION_DIAL
-        c.startActivity(Intent(action, Uri.parse("tel:" + Uri.encode(number))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        return if (action == Intent.ACTION_CALL) "Rufe $label an ($number)." else "Telefon mit $label ($number) geöffnet – Anruf noch antippen."
+        val uri = Uri.parse("tel:" + Uri.encode(number))
+        if (canCall(c)) {
+            // 1. Über das Telefonsystem (funktioniert auch aus dem Hintergrund)
+            try {
+                val tm = c.getSystemService(android.telecom.TelecomManager::class.java)
+                tm.placeCall(uri, Bundle())
+                if (waitForCall(c)) return "Rufe $label an ($number)."
+            } catch (_: Exception) {}
+            // 2. Klassisch per Anruf-Befehl
+            try {
+                c.startActivity(Intent(Intent.ACTION_CALL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                if (waitForCall(c)) return "Rufe $label an ($number)."
+            } catch (_: Exception) {}
+        }
+        // 3. Notlösung: Telefon-App mit Nummer öffnen
+        try { c.startActivity(Intent(Intent.ACTION_DIAL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) {}
+        return "Ich konnte den Anruf nicht selbst starten. Die Telefon-App ist mit $label ($number) offen – tippe auf den grünen Hörer." +
+            if (!canCall(c)) " (Tipp: Unter ZUGRIFF «Anrufe» erlauben, dann geht es automatisch.)" else ""
     }
 }

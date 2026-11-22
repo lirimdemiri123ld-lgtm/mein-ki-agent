@@ -568,7 +568,7 @@ class MainActivity : Activity() {
     // ------------------------------------------------------------------ Spracheingabe (eigenes Interface)
 
     private fun listen() {
-        if (Agent.running) return
+        if (Agent.running || Contacts.inCall(this)) return
         Speaker.stop()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_MIC_LISTEN)

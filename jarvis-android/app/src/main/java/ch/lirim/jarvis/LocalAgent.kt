@@ -334,8 +334,14 @@ Jetzt: $now.
                 remember(command, done); say(done); return
             }
         }
-        remember(command, msg)
-        say(msg)
+        // Nichts getan, aber behauptet, etwas erledigt zu haben? → ehrlich sein statt erfinden
+        val claimed = Regex("""(?i)\b(angerufen|gesendet|geschickt|geschrieben|geöffnet|gespeichert|gestellt|erledigt|gelöscht|notiert|eingetragen)\b""")
+        val honest = if (st.history.isEmpty() && claimed.containsMatchIn(msg))
+            (if (command.trim().split(Regex("\\s+")).size <= 2) "Wie meinst du das? Sag mir bitte, was ich tun soll."
+             else "Dazu habe ich noch nichts ausgeführt. Sag mir bitte genauer, was ich tun soll.")
+        else msg
+        remember(command, honest)
+        say(honest)
         // Erfolgreichen Ablauf als Erfahrung speichern → nächstes Mal schneller
         if (complex && st.plan.isNotEmpty() && st.history.size >= 2) {
             Memory.saveSkill(c, command, st.plan.take(st.current.coerceAtLeast(1) + 1))
