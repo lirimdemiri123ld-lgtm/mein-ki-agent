@@ -36,7 +36,12 @@ object TaskLogic {
     // ---------------------------------------------------------------- Plan
 
     const val PLAN_SYSTEM = """Du planst Aufgaben für Jarvis, einen Assistenten, der ein Android-Handy bedient (Apps öffnen, tippen, Text eingeben, scrollen, lesen).
-Zerlege den Auftrag in 2 bis 8 kurze, konkrete Schritte. Jeder Schritt ist eine sichtbare Teilaufgabe auf dem Handy.
+Zerlege den Auftrag in 2 bis 6 kurze, konkrete Schritte. Jeder Schritt ist eine sichtbare Teilaufgabe auf dem Handy.
+Regeln für gute Pläne:
+- Ein Text wird in einem Schritt eingegeben (kein eigener Schritt fürs Antippen des Textfelds).
+- Erfinde keine Knöpfe, die es vielleicht nicht gibt (z. B. «Zusammenfassen»). Zusammenfassen, zählen oder vergleichen machst du selbst aus dem, was du gelesen und notiert hast.
+- Infos, die auf einem Bildschirm stehen, werden gelesen und notiert (z. B. «Betreff und Absender der ungelesenen Mails notieren»).
+- Der letzte Schritt ist immer «Lirim das Ergebnis mitteilen».
 Antworte NUR mit einer nummerierten Liste, ohne Einleitung."""
 
     fun planPrompt(command: String, hints: String): String = buildString {
@@ -84,7 +89,9 @@ Antworte NUR mit einer nummerierten Liste, ohne Einleitung."""
         if (s.screen.isNotBlank()) append("\nAktueller Bildschirm:\n").append(s.screen.take(2600)).append('\n')
         append(
             if (s.plan.isEmpty()) "\nWähle die nächste Aktion."
-            else "\nWähle die nächste Aktion für den aktuellen Schritt. Ist er erledigt: schritt_erledigt. Ist der ganze Auftrag erledigt: fertig (mit Zusammenfassung)."
+            else "\nPrüfe zuerst am Bildschirm: Ist der aktuelle Schritt schon erledigt? Dann schritt_erledigt. " +
+                "Sonst wähle EIN Werkzeug für diesen Schritt. Stehen nötige Infos auf dem Bildschirm, halte sie mit notiz fest. " +
+                "Ist alles erledigt: fertig mit der Antwort an Lirim."
         )
     }
 
@@ -96,4 +103,23 @@ Antworte NUR mit einer nummerierten Liste, ohne Einleitung."""
         .joinToString("\n").hashCode()
 
     fun actionKey(name: String, args: Map<String, Any?>) = name + args.toSortedMap().toString()
+
+    /** Was tun, wenn das Modell mitten in einer Planaufgabe nur Text liefert? */
+    fun textMeansFinish(s: State, text: String, textStreak: Int): Boolean {
+        if (s.plan.isEmpty()) return true
+        if (s.current >= s.plan.size) return true
+        if (s.current >= s.plan.size - 1 && text.length > 60) return true   // letzter Schritt = Ergebnis mitteilen
+        return textStreak >= 3
+    }
+
+    fun textHint(s: State) =
+        "Du hast nur geschrieben, aber nichts getan. Der aktuelle Schritt ist «${s.plan.getOrElse(s.current) { "" }}». Rufe jetzt ein Werkzeug auf."
+
+    /** Gleiche Aktion ohne Wirkung wiederholt → wahrscheinlich ist der Schritt schon erledigt. */
+    fun repeatHint(tool: String, times: Int) =
+        "Du hast «$tool» mit denselben Angaben schon ${times}× gemacht, ohne dass sich etwas ändert. Ist der aktuelle Schritt vielleicht schon erledigt? Dann schritt_erledigt. Sonst versuche etwas anderes."
+
+    /** Zusammenfassung aus Notizen, falls das Modell ohne Antwort aufhört. */
+    fun fallbackAnswer(s: State): String =
+        if (s.notes.isNotEmpty()) s.notes.joinToString(". ").take(400) else "Erledigt."
 }

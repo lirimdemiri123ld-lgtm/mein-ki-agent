@@ -124,6 +124,7 @@ Jetzt: $now.
         val actionCount = HashMap<String, Int>()
         var image: ByteArray? = null
         var imageFactor = 1f
+        var textStreak = 0
 
         for (step in 1..maxActions) {
             if (shouldStop()) return Result.STOPPED
@@ -150,14 +151,16 @@ Jetzt: $now.
             if (name == null) ToolTextParser.parse(r.text, params)?.let { name = it.name; args = it.args }
             val tool = name
             if (tool == null) {
-                val answer = ToolTextParser.cleanup(r.text).ifBlank { "Erledigt." }
-                if (complex && plan.isNotEmpty() && st.current < plan.size && step < maxActions - 1 && answer.length < 40) {
-                    st.hint = "Bitte wähle ein Werkzeug für den aktuellen Schritt."
+                val answer = ToolTextParser.cleanup(r.text).ifBlank { TaskLogic.fallbackAnswer(st) }
+                textStreak++
+                if (complex && !TaskLogic.textMeansFinish(st, answer, textStreak)) {
+                    st.hint = TaskLogic.textHint(st)
                     continue
                 }
                 finish(c, command, answer, st, complex, say)
                 return Result.DONE
             }
+            textStreak = 0
             val input = JSONObject(args.filterValues { it != null })
             Agent.log("→ [${model.title.substringBefore(" ·").substringAfter("Gemma 4 ")}] $tool $input")
 
@@ -165,9 +168,9 @@ Jetzt: $now.
             val key = TaskLogic.actionKey(tool, args)
             val n = (actionCount[key] ?: 0) + 1
             actionCount[key] = n
-            if (n >= 3 && tool !in setOf("scrollen", "warten", "schritt_erledigt")) {
-                st.hint = "Du hast «$tool» mit denselben Angaben schon ${n - 1}× versucht. Mach etwas anderes."
-                if (n >= 5) { lastError = "Ich drehe mich im Kreis."; return Result.FAILED }
+            if (n >= 2 && tool !in setOf("scrollen", "warten", "schritt_erledigt", "notiz")) {
+                st.hint = TaskLogic.repeatHint(tool, n - 1)
+                if (n >= 4) { lastError = "Ich drehe mich im Kreis."; return Result.FAILED }
                 continue
             }
 
@@ -189,6 +192,10 @@ Jetzt: $now.
                     return Result.ESCALATE
                 }
                 "schritt_erledigt" -> {
+                    if (plan.isNotEmpty() && st.current >= plan.size) {
+                        finish(c, command, TaskLogic.fallbackAnswer(st), st, complex, say)
+                        return Result.DONE
+                    }
                     val e = input.optString("ergebnis")
                     if (e.isNotBlank()) st.notes.add(e)
                     st.history.add("✓ Schritt ${st.current + 1} erledigt${if (e.isNotBlank()) ": $e" else ""}")

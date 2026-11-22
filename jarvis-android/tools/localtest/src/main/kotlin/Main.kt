@@ -103,17 +103,28 @@ Hintergrundwissen über Lirim:
                 val sim = Sim()
                 val st = TaskLogic.State(cmd, plan, screen = sim.show())
                 var result = "ABBRUCH"
+                var textStreak = 0
+                val counts = HashMap<String, Int>()
                 for (step in 1..25) {
                     val m = e.createConversation(ConversationConfig(systemInstruction = Contents.of(system), tools = tools,
                         automaticToolCalling = false, samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.3))).use { it.sendMessage(TaskLogic.execPrompt(st)) }
                     var name = m.toolCalls.firstOrNull()?.name; var a: Map<String, Any?> = m.toolCalls.firstOrNull()?.arguments ?: emptyMap()
                     if (name == null) ToolTextParser.parse(m.toString(), params)?.let { name = it.name; a = it.args }
                     st.hint = ""
-                    if (name == null) { result = "TEXT: " + ToolTextParser.cleanup(m.toString()).take(200); break }
+                    if (name == null) {
+                        val t = ToolTextParser.cleanup(m.toString()); textStreak++
+                        if (!TaskLogic.textMeansFinish(st, t, textStreak)) { println("  $step. (nur Text: ${t.take(60)}) → Hinweis"); st.hint = TaskLogic.textHint(st); continue }
+                        result = "TEXT: " + t.take(250); break
+                    }
+                    textStreak = 0
                     println("  $step. $name $a")
+                    val key = TaskLogic.actionKey(name!!, a); val n = (counts[key] ?: 0) + 1; counts[key] = n
+                    if (n >= 2 && name !in setOf("scrollen", "warten", "schritt_erledigt", "notiz")) {
+                        st.hint = TaskLogic.repeatHint(name!!, n - 1); if (n >= 4) { result = "KREIS"; break }; continue
+                    }
                     when (name) {
                         "fertig" -> { result = "FERTIG: ${a["nachricht"]}"; break }
-                        "schritt_erledigt" -> { a["ergebnis"]?.toString()?.takeIf { it.isNotBlank() }?.let { st.notes.add(it) }; st.current++; st.history.add("✓ Schritt erledigt")
+                        "schritt_erledigt" -> { if (st.current >= plan.size) { result = "FERTIG(auto): " + TaskLogic.fallbackAnswer(st); break }; a["ergebnis"]?.toString()?.takeIf { it.isNotBlank() }?.let { st.notes.add(it) }; st.current++; st.history.add("✓ Schritt erledigt")
                             if (st.current >= plan.size) st.hint = "Alle Planschritte sind erledigt. Rufe jetzt fertig mit einer Zusammenfassung auf." }
                         "notiz" -> { st.notes.add(a["text"].toString()); st.history.add("notiz gespeichert") }
                         "plan_aendern" -> { val neu = a["schritte"].toString().split(";").map { it.trim() }.filter { it.length > 2 }
