@@ -137,9 +137,10 @@ class ArcReactorView(c: Context) : View(c) {
         c.drawCircle(cx + (r * 0.84f * cos(oa)).toFloat(), cy + (r * 0.84f * sin(oa)).toFloat(), 3.5f * dp, fill)
 
         // Text
-        txt.textSize = 16 * dp
-        sub.textSize = 10 * dp
-        small.textSize = 8 * dp
+        // Schrift wächst mit dem Kreis (kleiner runder Reaktor oben)
+        txt.textSize = (r * 0.14f).coerceIn(8 * dp, 16 * dp)
+        sub.textSize = (r * 0.09f).coerceIn(6 * dp, 10 * dp)
+        small.textSize = (r * 0.07f).coerceIn(5 * dp, 8 * dp)
         c.drawText(label, cx, cy + r * 0.62f + 6 * dp, txt)
         c.drawText(subLabel.uppercase(), cx, cy - r * 0.55f, sub)
         c.drawText("MK-" + String.format("%02d", (t * 10).toInt() % 100), cx, cy + r * 0.75f + 4 * dp, small)

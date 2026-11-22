@@ -47,6 +47,7 @@ class MainActivity : Activity() {
         private const val REQ_PERMS = 43
         private const val REQ_MIC_LISTEN = 44
         private const val REQ_CONTACTS = 45
+        private const val REQ_CAL = 46
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -81,6 +82,10 @@ class MainActivity : Activity() {
     private lateinit var wxPlace: TextView
 
     private lateinit var marketBody: LinearLayout
+    private lateinit var agendaBody: LinearLayout
+    private lateinit var creditVal: TextView
+    private lateinit var creditSub: TextView
+    private lateinit var creditHint: TextView
     private lateinit var projectBody: LinearLayout
     private lateinit var commsBody: LinearLayout
     private lateinit var insightBody: LinearLayout
@@ -167,7 +172,7 @@ class MainActivity : Activity() {
         NotificationStore.listener = { main.post { refreshComms() } }
         Insights.listener = { main.post { refreshInsights(); refreshProjects() } }
         updateStatus()
-        refreshProjects(); refreshComms(); refreshInsights()
+        refreshProjects(); refreshComms(); refreshInsights(); refreshCredit(); refreshAgenda()
         main.removeCallbacks(frameTick); main.post(frameTick)
         main.removeCallbacks(secondTick); main.post(secondTick)
         refreshNet(force = false)
@@ -262,59 +267,78 @@ class MainActivity : Activity() {
         statusLine = hudText(10f, Hud.CYAN).apply { letterSpacing = 0.08f }
         col.addView(statusLine, lp(4))
 
-        // Live-Widgets ganz oben (kein Scrollen nötig)
-        // System + Wetter nebeneinander
+        // ── Oberste Reihe: Wetter · Jarvis (klein, rund, Mitte) · Guthaben
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val pWx = panel("Wetter")
+        wxPlace = pWx.text(9f, Hud.CYAN_SOFT).apply { maxLines = 1 }
+        val wxT = hudText(24f, Hud.ICE, true).apply { setShadowLayer(14f, 0f, 0f, Hud.CYAN) }
+        pWx.body.addView(wxT)
+        wxTemp = CountingText(wxT) { "%.1f°".format(it) }
+        wxDesc = pWx.text(10f, Hud.CYAN).apply { maxLines = 1 }
+        wxRange = pWx.text(9f).apply { maxLines = 1 }
+        wxWind = pWx.text(9f).apply { maxLines = 1 }
+        wxSpark = Sparkline(this, Hud.ORANGE)
+        pWx.body.addView(wxSpark, LinearLayout.LayoutParams(-1, dp(18)).apply { topMargin = dp(2) })
+
+        reactor = ArcReactorView(this)
+        reactor.setOnClickListener { if (listening) stopListening() else listen() }
+        reactor.setOnLongClickListener { Agent.stop(); Speaker.stop(); stopListening(); true }
+
+        val pCr = panel("Guthaben")
+        creditVal = hudText(20f, Hud.ICE, true).apply { setShadowLayer(12f, 0f, 0f, Hud.CYAN) }
+        pCr.body.addView(creditVal)
+        creditSub = pCr.text(9f, Hud.CYAN_SOFT)
+        creditHint = pCr.text(9f, Hud.ORANGE)
+        pCr.setOnClickListener { creditDialog() }
+
+        top.addView(pWx, LinearLayout.LayoutParams(0, dp(150), 1f))
+        top.addView(reactor, LinearLayout.LayoutParams(dp(138), dp(138)).apply { marginStart = dp(4); marginEnd = dp(4) })
+        top.addView(pCr, LinearLayout.LayoutParams(0, dp(150), 1f))
+        col.addView(top, lp(6))
+
+        kitt = ch.lirim.jarvis.hud.KittScanner(this).apply {
+            visibility = if (Prefs.voiceFx(this@MainActivity) == "kitt") android.view.View.VISIBLE else android.view.View.GONE
+        }
+        col.addView(kitt, LinearLayout.LayoutParams(-1, dp(14)).apply { topMargin = dp(4); leftMargin = dp(60); rightMargin = dp(60) })
+
+        transcript = hudText(13f, Hud.ICE).apply {
+            gravity = Gravity.CENTER
+            text = "Tippe auf den Kreis oder sag «Hallo Jarvis»"
+            setShadowLayer(10f, 0f, 0f, Hud.CYAN)
+            minLines = 1
+            maxLines = 3
+        }
+        col.addView(transcript, lp(4))
+
+        // ── Zweite Reihe: System · Heute (Termine, Wecker, Nachrichten)
         val twin = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val pSys = panel("System")
         cpuVal = pSys.row("CPU")
-        cpuMeter = Meter(this); pSys.body.addView(cpuMeter, LinearLayout.LayoutParams(-1, dp(8)).apply { topMargin = dp(3) })
+        cpuMeter = Meter(this); pSys.body.addView(cpuMeter, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(2) })
         cpuSpark = Sparkline(this).apply { fixedMax = 1f }
-        pSys.body.addView(cpuSpark, LinearLayout.LayoutParams(-1, dp(28)).apply { topMargin = dp(4) })
+        pSys.body.addView(cpuSpark, LinearLayout.LayoutParams(-1, dp(20)).apply { topMargin = dp(3) })
         ramVal = pSys.row("RAM")
-        ramMeter = Meter(this); pSys.body.addView(ramMeter, LinearLayout.LayoutParams(-1, dp(8)).apply { topMargin = dp(3) })
-        batVal = pSys.row("Energie")
+        ramMeter = Meter(this); pSys.body.addView(ramMeter, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(2) })
+        batVal = pSys.row("Akku")
         tempVal = pSys.row("Temp")
         diskVal = pSys.row("Disk")
 
-        val pWx = panel("Wetter")
-        wxPlace = pWx.text(10f, Hud.CYAN_SOFT)
-        val wxT = hudText(30f, Hud.ICE, true).apply { setShadowLayer(14f, 0f, 0f, Hud.CYAN) }
-        pWx.body.addView(wxT)
-        wxTemp = CountingText(wxT) { "%.1f°".format(it) }
-        wxDesc = pWx.text(12f, Hud.CYAN)
-        wxRange = pWx.text(11f)
-        wxWind = pWx.text(11f)
-        wxSpark = Sparkline(this, Hud.ORANGE)
-        pWx.body.addView(wxSpark, LinearLayout.LayoutParams(-1, dp(28)).apply { topMargin = dp(4) })
-        pWx.text(9f, Hud.CYAN_SOFT).text = "NÄCHSTE 24 H"
+        val pDay = panel("Heute")
+        agendaBody = pDay.body
+        pDay.setOnClickListener {
+            if (checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED)
+                requestPermissions(arrayOf(Manifest.permission.READ_CALENDAR), REQ_CAL)
+            else refreshAgenda()
+        }
 
-        twin.addView(pSys, LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(6) })
-        twin.addView(pWx, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(6) })
+        twin.addView(pSys, LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(5) })
+        twin.addView(pDay, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(5) })
         col.addView(twin, lp(8))
 
         val pMk = panel("Märkte · Live")
         marketBody = pMk.body
         pMk.setOnClickListener { refreshNet(force = true) }
         col.addView(pMk, lp(8))
-
-
-        // Reaktor
-        reactor = ArcReactorView(this)
-        reactor.setOnClickListener { if (listening) stopListening() else listen() }
-        reactor.setOnLongClickListener { Agent.stop(); Speaker.stop(); stopListening(); true }
-        col.addView(reactor, LinearLayout.LayoutParams(-1, dp(230)).apply { topMargin = dp(6) })
-        kitt = ch.lirim.jarvis.hud.KittScanner(this).apply {
-            visibility = if (Prefs.voiceFx(this@MainActivity) == "kitt") android.view.View.VISIBLE else android.view.View.GONE
-        }
-        col.addView(kitt, LinearLayout.LayoutParams(-1, dp(18)).apply { topMargin = dp(4); leftMargin = dp(40); rightMargin = dp(40) })
-
-        transcript = hudText(15f, Hud.ICE).apply {
-            gravity = Gravity.CENTER
-            text = "Tippe auf den Reaktor oder sag «Hallo Jarvis»"
-            setShadowLayer(10f, 0f, 0f, Hud.CYAN)
-            minLines = 2
-        }
-        col.addView(transcript, lp(2))
 
         // Eingabe
         val inRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -409,11 +433,82 @@ class MainActivity : Activity() {
             clock.text = SimpleDateFormat("HH:mm:ss", Locale.GERMAN).format(now)
             dateView.text = SimpleDateFormat("EEE d. MMM yyyy", Locale.GERMAN).format(now).uppercase()
             if (tickCount % 2 == 0) refreshSystem()
-            if (tickCount % 10 == 0) updateStatus()
+            if (tickCount % 10 == 0) { updateStatus(); refreshCredit() }
+            if (tickCount % 60 == 0) refreshAgenda()
             if (tickCount % 300 == 299) refreshNet(force = false)
             tickCount++
             if (visible) main.postDelayed(this, 1000)
         }
+    }
+
+    // ── Guthaben (Schätzung: dein eingetragener Betrag minus Jarvis-Verbrauch)
+    private fun refreshCredit() {
+        val bal = Prefs.creditBalance(this)
+        val blocked = System.currentTimeMillis() < Prefs.cloudBlockedUntil(this)
+        if (bal == null) {
+            creditVal.text = "– \$"
+            creditVal.setTextColor(Hud.CYAN_SOFT)
+            creditSub.text = "Monat ≈ ${Agent.rp(Prefs.monthCost(this))}"
+            creditHint.text = "Antippen: Betrag eintragen"
+            return
+        }
+        creditVal.text = "%.2f \$".format(Locale.US, bal)
+        val color = when { blocked || bal <= 0.2 -> Hud.RED; bal < 1.5 -> Hud.ORANGE; else -> Hud.GREEN }
+        creditVal.setTextColor(color)
+        creditSub.text = "≈ %.2f Fr.\nMonat ≈ %s\nGratis: %d · Gelernt: %d".format(Locale.US, bal * 0.8,
+            Agent.rp(Prefs.monthCost(this)), Prefs.savedTasks(this), RecipeStore.count(this))
+        creditHint.text = when {
+            blocked || bal <= 0.2 -> "⚠ AUFLADEN NÖTIG"
+            bal < 1.5 -> "Bald aufladen"
+            else -> ""
+        }
+    }
+
+    private fun creditDialog() {
+        val et = EditText(this).apply {
+            hint = "z. B. 4.83"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            Prefs.creditBalance(this@MainActivity)?.let { setText("%.2f".format(Locale.US, it)) }
+        }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        box.addView(TextView(this).apply {
+            text = "Anthropic zeigt dein Guthaben nur in der Console an (Billing). Trag den Betrag in Dollar hier ein – Jarvis zieht danach jede Aufgabe selbst ab."
+        })
+        box.addView(et)
+        android.app.AlertDialog.Builder(this).setTitle("Claude-Guthaben")
+            .setView(box)
+            .setPositiveButton("Speichern") { _, _ ->
+                et.text.toString().replace(',', '.').toDoubleOrNull()?.let {
+                    Prefs.setCreditBalance(this, it)
+                    if (it > 0.2) Prefs.setCloudBlockedUntil(this, 0L)
+                    refreshCredit()
+                }
+            }
+            .setNeutralButton("Console öffnen") { _, _ ->
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://platform.claude.com/settings/billing")))
+            }
+            .setNegativeButton("Abbrechen", null)
+            .show()
+    }
+
+    // ── Heute: nächster Wecker, Termine, ungelesene Nachrichten
+    private fun refreshAgenda() {
+        agendaBody.removeAllViews()
+        fun line(t: String, color: Int = Hud.ICE, size: Float = 10f) =
+            agendaBody.addView(hudText(size, color).apply { text = t; maxLines = 2 })
+        try {
+            val am = getSystemService(android.app.AlarmManager::class.java)
+            am.nextAlarmClock?.let {
+                line("⏰ " + SimpleDateFormat("EEE HH:mm", Locale.GERMAN).format(Date(it.triggerTime)), Hud.ORANGE, 11f)
+            }
+        } catch (_: Exception) {}
+        if (checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED) {
+            val ev = Agenda.next(this, 3)
+            if (ev.isEmpty()) line("Keine Termine in den nächsten 2 Tagen.", Hud.CYAN_SOFT)
+            ev.forEach { (time, title) -> line("◆ $time", Hud.CYAN, 10f); line(title, Hud.ICE, 10f) }
+        } else line("Antippen, um Termine anzuzeigen.", Hud.CYAN_SOFT)
+        val n = NotificationStore.recent(40).count { System.currentTimeMillis() - it.time < 12 * 3600_000L }
+        if (n > 0) line("✉ $n neue Meldungen", Hud.CYAN_SOFT)
     }
 
     private fun refreshSystem() {
@@ -745,6 +840,7 @@ class MainActivity : Activity() {
             REQ_PERMS -> if (mic) WakeWordService.start(this)
                 else Toast.makeText(this, "Ohne Mikrofon kann Jarvis nicht auf «Hallo Jarvis» hören.", Toast.LENGTH_LONG).show()
             REQ_MIC_LISTEN -> if (mic) listen() else listenFallback()
+            REQ_CAL -> refreshAgenda()
         }
     }
 

@@ -322,6 +322,7 @@ object Agent {
             messages = JSONArray(); pendingResults = null; awaitingAnswer = false
             if (e.message?.contains("credit", ignoreCase = true) == true) {
                 Prefs.setCloudBlockedUntil(ctx, System.currentTimeMillis() + 6 * 3600_000L)
+                Prefs.setCreditBalance(ctx, 0.0)
                 say("Dein Claude-Guthaben ist leer. Gelernte Abläufe und einfache Befehle funktionieren weiter gratis.")
             } else throw e
         }

@@ -90,8 +90,15 @@ object Prefs {
         if (p(c).getString("cost_month", "") == monthKey()) p(c).getFloat("cost_usd", 0f).toDouble() else 0.0
     fun addCost(c: Context, usd: Double) {
         val cur = monthCost(c)
-        p(c).edit().putString("cost_month", monthKey()).putFloat("cost_usd", (cur + usd).toFloat()).apply()
+        val e = p(c).edit().putString("cost_month", monthKey()).putFloat("cost_usd", (cur + usd).toFloat())
+        creditBalance(c)?.let { e.putFloat("credit", (it - usd).toFloat()) }
+        e.apply()
     }
+
+    /** Selbst eingetragenes Claude-Guthaben in $ (null = unbekannt). Wird bei jeder Aufgabe reduziert. */
+    fun creditBalance(c: Context): Double? =
+        if (p(c).contains("credit")) p(c).getFloat("credit", 0f).toDouble() else null
+    fun setCreditBalance(c: Context, usd: Double) = p(c).edit().putFloat("credit", usd.toFloat()).apply()
     fun savedTasks(c: Context): Int =
         if (p(c).getString("saved_month", "") == monthKey()) p(c).getInt("saved_n", 0) else 0
     fun addSaved(c: Context) =
