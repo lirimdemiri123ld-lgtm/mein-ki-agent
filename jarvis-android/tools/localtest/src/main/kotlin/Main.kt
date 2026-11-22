@@ -40,7 +40,7 @@ Jetzt: Sonntag, 22. November 2026, 00:10.
     println("=== Parser-Tests")
     for (t in listOf("merken:kategorie=person,text=gruya als meine Frau abspeichern", "bestaetigen:frage:Ruf meine Frau mal an",
         "bestaetigen{frage:<|\"|>Soll ich WhatsApp öffnen?<|\"|>}", "fertig", "fertig: Hallo Lirim", "app_oeffnen(name=\"WhatsApp\")",
-        "anrufen: Shukrije", "wecker_stellen:stunde=7,minute=30", "Hallo, wie kann ich helfen?"))
+        "anrufen: Shukrije", "merken(kategorie:person,text:Gruja ist meine Frau) fertig", "wecker_stellen:stunde=7,minute=30", "Hallo, wie kann ich helfen?"))
         println("  «$t» -> ${ToolTextParser.parse(t, known)}")
     Engine(EngineConfig(modelPath = args[0], backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = "/tmp")).use { e ->
         e.initialize()

@@ -11,7 +11,7 @@ package ch.lirim.jarvis.core
  */
 object ToolTextParser {
     private const val Q = '\u0001'
-    private val braceRe = Regex("""^\s*`*\s*([a-z_]+)\s*[\{\(](.*)[\}\)]\s*`*\s*$""", RegexOption.DOT_MATCHES_ALL)
+    private val braceRe = Regex("""^\s*`*\s*([a-z_]+)\s*[\{\(](.*)[\}\)][^\}\)]*$""", RegexOption.DOT_MATCHES_ALL)
     private val colonRe = Regex("""^\s*`*\s*([a-z_]+)\s*:\s*(.*?)\s*`*\s*$""", RegexOption.DOT_MATCHES_ALL)
     private val fertigRe = Regex("""^\s*(fertig|antwort)\s*[:\-–]?\s+(.+)$""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
 
