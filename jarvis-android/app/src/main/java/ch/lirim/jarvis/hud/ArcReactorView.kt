@@ -144,7 +144,7 @@ class ArcReactorView(c: Context) : View(c) {
         c.drawText(subLabel.uppercase(), cx, cy - r * 0.55f, sub)
         c.drawText("MK-" + String.format("%02d", (t * 10).toInt() % 100), cx, cy + r * 0.75f + 4 * dp, small)
 
-        postInvalidateOnAnimation()
+        postInvalidateDelayed(33)
     }
 
     private fun arcSegments(c: Canvas, cx: Float, cy: Float, r: Float, n: Int, len: Float, start: Float, p: Paint) {

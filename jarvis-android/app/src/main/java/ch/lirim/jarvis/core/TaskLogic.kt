@@ -78,9 +78,11 @@ Antworte NUR mit einer nummerierten Liste, ohne Einleitung."""
         val notes: MutableList<String> = mutableListOf(),
         var screen: String = "",
         var hint: String = "",
+        var context: String = "",
     )
 
     fun execPrompt(s: State): String = buildString {
+        if (s.context.isNotBlank()) append("Letztes Gespräch: ").append(s.context).append("\n\n")
         append("Auftrag von Lirim: ").append(s.command).append('\n')
         if (s.plan.isNotEmpty()) {
             append("\nPlan:\n")

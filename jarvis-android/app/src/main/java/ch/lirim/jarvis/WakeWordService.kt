@@ -28,6 +28,7 @@ class WakeWordService : Service(), RecognitionListener {
         private const val NOTIF_ID = 7
         private const val ACTION_STOP = "ch.lirim.jarvis.WAKE_STOP"
         private const val ACTION_RESUME = "ch.lirim.jarvis.WAKE_RESUME"
+        private const val ACTION_PAUSE = "ch.lirim.jarvis.WAKE_PAUSE"
         private const val GRAMMAR = "[\"hello jarvis\", \"jarvis\", \"[unk]\"]"
 
         @Volatile var running = false
@@ -46,6 +47,14 @@ class WakeWordService : Service(), RecognitionListener {
         }
 
         /** Nach der Spracheingabe wieder zuhören. */
+        /** Mikrofon freigeben (z. B. für die Spracheingabe in der App). */
+        fun pause(c: Context) {
+            if (!running) return
+            try {
+                c.startService(Intent(c, WakeWordService::class.java).setAction(ACTION_PAUSE))
+            } catch (_: Exception) {}
+        }
+
         fun resume(c: Context) {
             if (!running) return
             try {
@@ -83,6 +92,12 @@ class WakeWordService : Service(), RecognitionListener {
             ACTION_STOP -> {
                 Prefs.setWakeWord(this, false)
                 stopSelf()
+            }
+            ACTION_PAUSE -> {
+                paused = true
+                main.removeCallbacks(autoResume)
+                stopListening()
+                main.postDelayed(autoResume, 30_000)
             }
             ACTION_RESUME -> {
                 main.removeCallbacks(autoResume)

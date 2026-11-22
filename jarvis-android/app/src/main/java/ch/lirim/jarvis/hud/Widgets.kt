@@ -77,7 +77,7 @@ class HudPanel(c: Context, title: String) : LinearLayout(c) {
         // LED
         led.alpha = (140 + 115 * sin(t * 4)).toInt().coerceIn(0, 255)
         c.drawCircle(w - 12 * dp, 14 * dp, 3.5f * dp, led)
-        postInvalidateOnAnimation()
+        postInvalidateDelayed(33)
     }
 
     /** Zeile «Bezeichnung …… Wert». */
@@ -123,7 +123,7 @@ class Sparkline(c: Context, private val color: Int = Hud.CYAN) : View(c) {
     }
 
     override fun onDraw(c: Canvas) {
-        if (values.size < 2) { postInvalidateOnAnimation(); return }
+        if (values.size < 2) { postInvalidateDelayed(33); return }
         scroll = Hud.ease(scroll, 0f, 0.08f)
         val w = width.toFloat(); val h = height.toFloat()
         val mx = fixedMax ?: (values.maxOrNull() ?: 1f)
@@ -143,7 +143,7 @@ class Sparkline(c: Context, private val color: Int = Hud.CYAN) : View(c) {
         path.close()
         area.shader = LinearGradient(0f, 0f, 0f, h, (color and 0x00FFFFFF) or 0x55000000, color and 0x00FFFFFF, Shader.TileMode.CLAMP)
         c.drawPath(path, area)
-        postInvalidateOnAnimation()
+        postInvalidateDelayed(33)
     }
 }
 
@@ -170,7 +170,7 @@ class Meter(c: Context) : View(c) {
             val x = i * (seg + gap)
             c.drawRect(x, 0f, x + seg, height.toFloat(), p)
         }
-        postInvalidateOnAnimation()
+        if (kotlin.math.abs(value - target) > 0.002f) postInvalidateDelayed(33) else postInvalidateDelayed(500)
     }
 }
 
@@ -239,6 +239,6 @@ class KittScanner(c: Context) : View(c) {
             val x = i * (w + gap)
             c.drawRect(x, 0f, x + w, height.toFloat(), p)
         }
-        postInvalidateOnAnimation()
+        postInvalidateDelayed(33)
     }
 }

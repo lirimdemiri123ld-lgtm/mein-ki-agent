@@ -584,6 +584,7 @@ class MainActivity : Activity() {
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "de-CH")
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        WakeWordService.pause(this)
         listening = true
         transcript.text = "…"
         try { recognizer?.startListening(i) } catch (e: Exception) { listening = false; listenFallback() }

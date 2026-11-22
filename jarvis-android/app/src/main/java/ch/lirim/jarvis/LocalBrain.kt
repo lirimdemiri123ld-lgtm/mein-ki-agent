@@ -57,7 +57,10 @@ object LocalBrain {
     @Volatile var loading = false
         private set
 
-    fun isBusy() = busy.availablePermits() == 0
+    /** true solange eine native Anfrage noch läuft (auch nach Zeitüberschreitung). */
+    @Volatile private var inFlight = false
+
+    fun isBusy() = busy.availablePermits() == 0 || inFlight
 
     /** Bricht die laufende Antwort ab (Stopp-Knopf). */
     fun cancel() {
@@ -71,8 +74,12 @@ object LocalBrain {
     private fun <T> exclusive(c: Context, m: Model, wait: Long, timeoutMs: Long, body: (Engine) -> T): T {
         if (!busy.tryAcquire(wait, TimeUnit.MILLISECONDS)) throw IllegalStateException("Mein Gehirn ist gerade beschäftigt.")
         try {
+            if (inFlight) throw IllegalStateException("Mein Gehirn hängt noch an der letzten Aufgabe. Bitte kurz warten oder Jarvis neu starten.")
             val firstLoad = engine == null || loadedId != m.id
-            val f = worker.submit<T> { body(ensureEngine(c, m)) }
+            val f = worker.submit<T> {
+                inFlight = true
+                try { body(ensureEngine(c, m)) } finally { inFlight = false }
+            }
             return try {
                 f.get(if (firstLoad) timeoutMs + 180_000 else timeoutMs, TimeUnit.MILLISECONDS)
             } catch (e: TimeoutException) {
@@ -209,8 +216,8 @@ object LocalBrain {
                 Engine(EngineConfig(modelPath = path, backend = backend,
                     visionBackend = if (vision) Backend.GPU() else null,
                     maxNumTokens = 8192, cacheDir = c.cacheDir.path)).also { it.initialize() }
-            val attempts = listOf(
-                Triple(Backend.GPU(), true, "GPU+Bild"),
+            // Bildverständnis braucht viel RAM → beim grossen Modell weglassen (sonst beendet Android die App)
+            val attempts = (if (isBig(m)) emptyList() else listOf(Triple(Backend.GPU(), true, "GPU+Bild"))) + listOf(
                 Triple(Backend.GPU(), false, "GPU"),
                 Triple(Backend.CPU(), false, "CPU"),
             )

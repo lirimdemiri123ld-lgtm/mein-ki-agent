@@ -76,8 +76,8 @@ object Agent {
         Thread {
             try {
                 route(app, command)
-            } catch (e: Exception) {
-                log("⚠️ ${e.message}")
+            } catch (e: Throwable) {
+                log("⚠️ ${e.message ?: e.javaClass.simpleName}")
                 Speaker.say("Es gab einen Fehler.")
                 messages = JSONArray()
                 pendingResults = null

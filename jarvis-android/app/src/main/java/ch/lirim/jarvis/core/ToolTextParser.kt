@@ -26,6 +26,14 @@ object ToolTextParser {
             val name = m.groupValues[1]
             if (name in params) return Call(name, normalize(name, parseArgs(m.groupValues[2], params[name]!!), params))
         }
+        // «bestaetigenfrage: Soll ich …» (Werkzeug und Parameter zusammengeklebt)
+        for ((tool, ps) in params.entries.sortedByDescending { it.key.length }) {
+            if (!first.lowercase().startsWith(tool)) continue
+            val rest = first.substring(tool.length)
+            val p = ps.firstOrNull { rest.lowercase().startsWith(it) } ?: continue
+            val value = rest.substring(p.length).trimStart(':', '=', ' ').trim() + t.removePrefix(first)
+            if (value.isNotBlank()) return Call(tool, mapOf(p to cleanup(value.trim())))
+        }
         colonRe.find(first)?.let { m ->
             val name = m.groupValues[1]
             if (name in params) {

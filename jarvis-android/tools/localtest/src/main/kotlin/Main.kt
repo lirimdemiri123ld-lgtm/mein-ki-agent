@@ -97,6 +97,9 @@ Hintergrundwissen über Lirim:
     println("  Relationen: ${ch.lirim.jarvis.core.People.relations(facts)}")
     for (t in listOf("Ruf meine Frau an", "ruf meiner frau an", "Schreib meinem Chef", "Ruf Baba an", "ruf meinen Teamleiter an", "Ruf Ali an", "meine Frau"))
         println("  «$t» → ${ch.lirim.jarvis.core.People.resolve(t, facts)}   chatOnly=${TaskLogic.isChatOnly(t)}")
+    println("=== Parser (zusammengeklebt)")
+    for (t in listOf("bestaetigenfrage: Soll ich Lirim anrufen?", "anrufenwen: Gruja"))
+        println("  «$t» → ${ToolTextParser.parse(t, params)}")
     println("=== Router")
     for (c in listOf("Wie geht es dir?", "Öffne WhatsApp", "Ruf meine Frau an", "Stell einen Wecker um 7",
         "Schreib Ali auf WhatsApp, dass ich 10 Minuten später komme", "Fass meine ungelesenen Outlook-Mails zusammen",

@@ -123,7 +123,7 @@ Jetzt: $now.
         }
 
         val st = TaskLogic.State(command, plan)
-        if (recentChat.isNotEmpty() && !complex) st.notes.add("Gesprächsverlauf: " + recentChat.joinToString(" | "))
+        if (recentChat.isNotEmpty() && !complex) st.context = recentChat.joinToString(" | ")
         val maxActions = if (complex) 40 else 12
         var lastFp = 0
         val actionCount = HashMap<String, Int>()

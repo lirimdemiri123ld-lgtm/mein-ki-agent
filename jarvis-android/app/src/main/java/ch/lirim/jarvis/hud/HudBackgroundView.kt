@@ -77,6 +77,6 @@ class HudBackgroundView(c: Context) : View(c) {
         line.alpha = 140
         c.drawLine(0f, sy, w, sy, line)
 
-        postInvalidateOnAnimation()
+        postInvalidateDelayed(33)
     }
 }
