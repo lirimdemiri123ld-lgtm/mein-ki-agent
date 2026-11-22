@@ -303,7 +303,37 @@ Jetzt: $now.
         return Result.FAILED.also { lastError = "Zu viele Schritte." }
     }
 
+    /**
+     * Sicherheitsnetz: Das Modell hat nur geredet, aber eindeutig verlangt war eine Aktion.
+     * Dann führt die App sie selbst aus. @return Ergebnistext oder null
+     */
+    private fun intentFallback(c: Context, command: String): String? {
+        val lc = command.lowercase().trim()
+        val facts = Memory.factTexts(c)
+        if (Regex("""\bruf\b.*\ban\b|anrufen|telefonier""").containsMatchIn(lc)) {
+            val who = ch.lirim.jarvis.core.People.resolve(command, facts)
+                ?: Regex("""(?i)ruf\s+(.+?)\s+an\b""").find(command)?.groupValues?.get(1)?.takeIf { !ch.lirim.jarvis.core.People.isRelational(it) }
+                ?: return null
+            Agent.log("🛟 Sicherheitsnetz: rufe $who an")
+            return Tools.execute(c, "anrufen", JSONObject().put("wen", who)).text.substringBefore("\n\nAktueller Bildschirm").trim()
+        }
+        Regex("""^(?:hallo jarvis[,\s]*)?(?:öffne|starte|oeffne)\s+(?:die\s+app\s+)?(.+?)$""").find(lc)?.let { m ->
+            val app = m.groupValues[1].trim().removeSuffix(".").removeSuffix("app").trim()
+            if (app.isNotEmpty() && app.split(" ").size <= 3) {
+                Agent.log("🛟 Sicherheitsnetz: öffne $app")
+                return Tools.execute(c, "app_oeffnen", JSONObject().put("name", app)).text.substringBefore("\n\nAktueller Bildschirm").trim()
+            }
+        }
+        return null
+    }
+
     private fun finish(c: Context, command: String, msg: String, st: TaskLogic.State, complex: Boolean, say: (String) -> Unit) {
+        // Wurde gar nichts getan, obwohl eine Aktion verlangt war? → Sicherheitsnetz
+        if (!complex && st.history.isEmpty() && !TaskLogic.isChatOnly(command)) {
+            intentFallback(c, command)?.let { done ->
+                remember(command, done); say(done); return
+            }
+        }
         remember(command, msg)
         say(msg)
         // Erfolgreichen Ablauf als Erfahrung speichern → nächstes Mal schneller

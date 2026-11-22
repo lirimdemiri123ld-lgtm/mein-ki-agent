@@ -79,7 +79,10 @@ class Overlay(private val svc: AccessibilityService) {
                         try { wm.updateViewLayout(v, lp) } catch (_: Exception) {}
                     }
                 }
-                MotionEvent.ACTION_UP -> if (!moved) onBubbleTap()
+                MotionEvent.ACTION_UP -> if (!moved) {
+                    if (e.eventTime - e.downTime > 700 && Agent.running) { Agent.stop(); setStatus("Gestoppt.") }
+                    else onBubbleTap()
+                }
             }
             true
         }
@@ -91,8 +94,7 @@ class Overlay(private val svc: AccessibilityService) {
 
     private fun onBubbleTap() {
         if (Agent.running) {
-            Agent.stop()
-            setStatus("Gestoppt.")
+            setStatus("ich arbeite noch – lange drücken zum Stoppen")
             return
         }
         val i = Intent(svc, MainActivity::class.java)

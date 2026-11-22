@@ -35,6 +35,8 @@ object Agent {
         main.post { listener?.invoke(s) }
     }
 
+    fun lastActivityAt(): Long = maxOf(lastActivity, if (running) System.currentTimeMillis() else 0L)
+
     fun fullLog(): String = synchronized(logBuf) { logBuf.toString() }
 
     fun reset() {

@@ -61,6 +61,7 @@ object Insights {
         val local = useLocal(c)
         if (running) return false
         if (local && (Agent.running || LocalBrain.isBusy())) return false
+        if (System.currentTimeMillis() - Agent.lastActivityAt() < 10 * 60_000L) return false
         if (!local && (key.isBlank() || System.currentTimeMillis() < Prefs.cloudBlockedUntil(c))) return false
         running = true
         Prefs.setLastInsightTry(c, System.currentTimeMillis())
@@ -119,8 +120,10 @@ Höchstens 4 Tipps, höchstens 2 Erkenntnisse. Nie Passwörter oder Kontodaten.
                 }
             }
             Memory.setInsights(c, json.optString("briefing"), tips)
+            // Vermutungen NICHT als Fakten speichern – nur als Hinweis im Analyse-Panel
             json.optJSONArray("erkenntnisse")?.let { a ->
-                for (i in 0 until a.length()) Memory.remember(c, a.getString(i), "erkenntnis")
+                for (i in 0 until minOf(a.length(), 2)) tips.add(Memory.Tip("Beobachtung", a.getString(i)))
+                Memory.setInsights(c, json.optString("briefing"), tips)
             }
             Agent.log("💡 Neue Analyse: ${tips.size} Tipps")
             val msg = json.optString("meldung")
