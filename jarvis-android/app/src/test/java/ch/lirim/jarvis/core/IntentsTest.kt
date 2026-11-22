@@ -252,4 +252,16 @@ class IntentsTest {
         assertNull(p("Erzähl mir etwas über Pratteln"))
         assertNull(p(""))
     }
+
+    @Test fun spokenMessagesWithoutDass() {
+        val a = p("Öffne WhatsApp schreib gruya also meine Frau gehen wir zu pronto") as Intent.Message
+        assertEquals(Channel.WHATSAPP, a.channel)
+        assertEquals("meine Frau", a.to)
+        assertEquals("Gehen wir zu pronto.", MessageText.from(a.body)?.text)
+        val b = p("schreib Ali ich komme heute später") as Intent.Message
+        assertEquals("Ali", b.to)
+        assertEquals("Ich komme heute später.", MessageText.from(b.body)?.text)
+        assertNull(p("schreib einen Einkaufszettel mit Milch und Brot"))
+        assertNull(p("schreib mir eine Erinnerung"))
+    }
 }

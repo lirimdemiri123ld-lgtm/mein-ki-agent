@@ -58,8 +58,17 @@ class HudPanel(c: Context, title: String) : LinearLayout(c) {
             .setInterpolator(DecelerateInterpolator()).start()
     }
 
+    // Lebendig, aber sparsam: alle paar Sekunden läuft ein Lichtstreifen über das Panel (≈1 s mit 30 fps),
+    // dazwischen wird nur 1× pro Sekunde für die LED neu gezeichnet.
+    private var sweepStart = 0L
+    private var nextSweep = android.os.SystemClock.uptimeMillis() + 1500 + (Math.random() * 6000).toLong()
+
+    /** Sofort aufleuchten (z. B. wenn neue Daten da sind). */
+    fun pulse() { nextSweep = 0L; invalidate() }
+
     override fun onDraw(c: Canvas) {
-        t += 0.4f
+        val now = android.os.SystemClock.uptimeMillis()
+        t = now / 1000f
         val w = width.toFloat(); val h = height.toFloat()
         val k = 12 * dp
         rect.set(0f, 0f, w, h)
@@ -70,10 +79,22 @@ class HudPanel(c: Context, title: String) : LinearLayout(c) {
         c.drawLine(w, 0f, w - k, 0f, corner); c.drawLine(w, 0f, w, k, corner)
         c.drawLine(0f, h, k, h, corner); c.drawLine(0f, h, 0f, h - k, corner)
         c.drawLine(w, h, w - k, h, corner); c.drawLine(w, h, w, h - k, corner)
-        // Status-LED blinkt ruhig: 1× pro Sekunde neu zeichnen statt 30× (pro Panel!) – hält das Handy kühl
+        if (now >= nextSweep && sweepStart < nextSweep) sweepStart = now
+        val p = (now - sweepStart) / 1100f
+        val sweeping = p in 0f..1f
+        if (sweeping) {
+            val sx = (p * 1.4f - 0.2f) * w
+            shine.shader = LinearGradient(sx - 70 * dp, 0f, sx, 0f, 0x0000D4FF, 0x3300D4FF, Shader.TileMode.CLAMP)
+            c.drawRect(max(0f, sx - 70 * dp), 0f, sx.coerceAtMost(w), h, shine)
+            // Ecken leuchten kurz mit
+            corner.alpha = (160 + 95 * (1f - p)).toInt()
+        } else {
+            corner.alpha = 255
+            if (now - sweepStart > 1100 && nextSweep <= sweepStart) nextSweep = now + 5000 + (Math.random() * 7000).toLong()
+        }
         led.alpha = (140 + 115 * sin(t * 4)).toInt().coerceIn(0, 255)
         c.drawCircle(w - 12 * dp, 14 * dp, 3.5f * dp, led)
-        postInvalidateDelayed(1000)
+        postInvalidateDelayed(if (sweeping) 33 else minOf(500L, (nextSweep - now).coerceAtLeast(16)))
     }
 
     /** Zeile «Bezeichnung …… Wert». */

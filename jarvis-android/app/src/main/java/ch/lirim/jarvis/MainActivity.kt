@@ -27,6 +27,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import ch.lirim.jarvis.core.Redact
 import ch.lirim.jarvis.hud.ArcReactorView
 import ch.lirim.jarvis.hud.CountingText
 import ch.lirim.jarvis.hud.Hud
@@ -83,6 +84,9 @@ class MainActivity : Activity() {
 
     private lateinit var marketBody: LinearLayout
     private lateinit var agendaBody: LinearLayout
+    private lateinit var ticker: TextView
+    private var commsPanel: HudPanel? = null
+    private var lastMarkets: List<Stocks.Quote> = emptyList()
     private lateinit var creditVal: TextView
     private lateinit var creditSub: TextView
     private lateinit var creditHint: TextView
@@ -268,6 +272,19 @@ class MainActivity : Activity() {
         statusLine = hudText(10f, Hud.CYAN).apply { letterSpacing = 0.08f }
         col.addView(statusLine, lp(4))
 
+        // Laufschrift: Börse, Wetter, Wecker, Guthaben, Meldungen – läuft ständig durch (Android-Marquee, kostet kaum Akku)
+        ticker = hudText(11f, Hud.CYAN).apply {
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1
+            setHorizontallyScrolling(true)
+            isSelected = true
+            text = "J.A.R.V.I.S. ONLINE  ◆  LADE LIVE-DATEN …"
+            background = GradientDrawable().apply { setColor(Color.argb(90, 0, 40, 70)); setStroke(1, Hud.CYAN_SOFT) }
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+        }
+        col.addView(ticker, lp(6))
+
         // ── Oberste Reihe: Wetter · Jarvis (klein, rund, Mitte) · Guthaben
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val pWx = panel("Wetter")
@@ -293,7 +310,7 @@ class MainActivity : Activity() {
         pCr.setOnClickListener { creditDialog() }
 
         top.addView(pWx, LinearLayout.LayoutParams(0, dp(150), 1f))
-        top.addView(reactor, LinearLayout.LayoutParams(dp(138), dp(138)).apply { marginStart = dp(4); marginEnd = dp(4) })
+        top.addView(reactor, LinearLayout.LayoutParams(dp(124), dp(124)).apply { marginStart = dp(4); marginEnd = dp(4) })
         top.addView(pCr, LinearLayout.LayoutParams(0, dp(150), 1f))
         col.addView(top, lp(6))
 
@@ -335,6 +352,11 @@ class MainActivity : Activity() {
         twin.addView(pSys, LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(5) })
         twin.addView(pDay, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(5) })
         col.addView(twin, lp(8))
+
+        val pCm = panel("Nachrichten · live")
+        commsBody = pCm.body
+        commsPanel = pCm
+        col.addView(pCm, lp(8))
 
         val pMk = panel("Märkte · Live")
         marketBody = pMk.body
@@ -384,9 +406,6 @@ class MainActivity : Activity() {
         projectBody = pPr.body
         col.addView(pPr, lp(12))
 
-        val pCm = panel("Kommunikation")
-        commsBody = pCm.body
-        col.addView(pCm, lp(12))
 
         val pLog = panel("Protokoll")
         logView = pLog.text(11f, Hud.ICE).apply { setLineSpacing(0f, 1.1f); minLines = 8 }
@@ -436,12 +455,28 @@ class MainActivity : Activity() {
             clock.text = SimpleDateFormat("HH:mm:ss", Locale.GERMAN).format(now)
             dateView.text = SimpleDateFormat("EEE d. MMM yyyy", Locale.GERMAN).format(now).uppercase()
             if (tickCount % 2 == 0) refreshSystem()
-            if (tickCount % 10 == 0) { updateStatus(); refreshCredit() }
+            if (tickCount % 10 == 0) { updateStatus(); refreshCredit(); updateTicker() }
             if (tickCount % 60 == 0) refreshAgenda()
             if (tickCount % 300 == 299) refreshNet(force = false)
             tickCount++
             if (visible) main.postDelayed(this, 1000)
         }
+    }
+
+    /** Inhalt der Laufschrift neu zusammenstellen (nur wenn er sich ändert, sonst springt sie zurück). */
+    private fun updateTicker() {
+        val parts = ArrayList<String>()
+        lastMarkets.forEach { parts.add("${it.name} ${"%,.2f".format(it.price)} ${if (it.change >= 0) "▲" else "▼"}${"%.2f".format(Math.abs(it.change))}%") }
+        Weather.last?.let { parts.add("${it.place.uppercase()} ${"%.0f".format(it.temp)}° ${Weather.describe(it.code)} ☂${it.rainProb}%") }
+        try { getSystemService(android.app.AlarmManager::class.java).nextAlarmClock?.let {
+            parts.add("⏰ " + SimpleDateFormat("EEE HH:mm", Locale.GERMAN).format(Date(it.triggerTime)))
+        } } catch (_: Exception) {}
+        Prefs.creditBalance(this)?.let { parts.add("GUTHABEN %.2f \$".format(Locale.US, it)) }
+        val n = NotificationStore.recent(40).count { System.currentTimeMillis() - it.time < 12 * 3600_000L }
+        if (n > 0) parts.add("✉ $n neue Meldungen")
+        parts.add("GRATIS ERLEDIGT: ${Prefs.savedTasks(this)}  ·  GELERNT: ${RecipeStore.count(this)}")
+        val txt = parts.joinToString("   ◆   ").uppercase()
+        if (ticker.text.toString() != txt) { ticker.text = txt; ticker.isSelected = true }
     }
 
     // ── Guthaben (Schätzung: dein eingetragener Betrag minus Jarvis-Verbrauch)
@@ -548,7 +583,9 @@ class MainActivity : Activity() {
                 } else if (wxPlace.text.isNullOrEmpty()) {
                     wxPlace.text = "KEINE VERBINDUNG"
                 }
+                if (q.isNotEmpty()) lastMarkets = q
                 renderMarkets(q)
+                updateTicker()
             }
         }.start()
     }
@@ -604,7 +641,7 @@ class MainActivity : Activity() {
             })
             return
         }
-        val items = NotificationStore.recent(7)
+        val items = NotificationStore.recent(3)
         if (items.isEmpty()) {
             commsBody.addView(hudText(11f, Hud.CYAN_SOFT).apply { text = "Kanal ruhig. Keine neuen Nachrichten." })
             return
@@ -615,9 +652,11 @@ class MainActivity : Activity() {
             box.addView(hudText(10f, Hud.CYAN, true).apply {
                 text = "${f.format(Date(n.time))} ▸ ${n.app.uppercase()} ▸ ${n.title}"
             })
-            box.addView(hudText(11f, Hud.ICE).apply { text = n.text; maxLines = 2 })
+            box.addView(hudText(11f, Hud.ICE).apply { text = Redact.secrets(n.text); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
             commsBody.addView(box)
         }
+        commsPanel?.pulse()
+        updateTicker()
     }
 
     private fun refreshInsights() {

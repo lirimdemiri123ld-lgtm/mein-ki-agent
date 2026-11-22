@@ -109,8 +109,10 @@ object Intents {
         val isCompound = compound.containsMatchIn(head)
 
         memory(u)?.let { return it }
+        openThenMessage(u)?.let { return it }
         if (isCompound) return null
         message(u)?.let { return it }
+        looseMessage(u, null)?.let { return it }
         call(u)?.let { return it }
         alarm(u, now)?.let { return it }
         timer(u)?.let { return it }
@@ -311,12 +313,74 @@ object Intents {
         val toNorm = Utt.norm(to)
         if (toNorm.isEmpty() || toNorm.split(' ').first() in notRecipients && !toNorm.startsWith("mein")) return null
         if (toNorm.split(' ').size > 6) return null
+        // «schreib Ali ich komme später» – kein Kanal, kein «dass»: Empfänger ist nicht der ganze Satz → lockere Form versuchen
+        if (body is Body.None && channel == null && !hasNoun && toNorm.split(' ').size > 2 && !toNorm.startsWith("mein")) return null
         // «frag»/«sag» ohne Kanal und ohne «dass/ob» ist meist keine Nachricht («sag mir …», «frag Claude»)
         val explicit = channel != null || hasNoun || leadChannel != null
         if (!explicit && marker < 0 && verb in setOf("sag", "sage", "frag", "frage", "melde", "antworte")) return null
         if (verb in setOf("frag", "frage") && body is Body.Clause && body.kind == "dass") return null
         val sure = explicit || (marker >= 0 && toNorm.split(' ').size <= 3)
         return Intent.Message(channel, channelName, to, body, sure)
+    }
+
+    /** «Öffne WhatsApp (und) schreib Gruja …» → Nachricht über WhatsApp. */
+    private val openPrefix = rx("""^(?:öffne|oeffne|geh auf|gehe auf|mach|starte) (?:mir )?(whatsapp|whats app|sms|signal|telegram)(?: auf)?(?: und)? (.+)$""")
+
+    private fun openThenMessage(u: Utt): Intent? {
+        val m = openPrefix.find(u.text) ?: return null
+        val ch = channelWords[m.groupValues[1].replace(" ", "")] ?: return null
+        val restNorm = m.groupValues[2]
+        if (restNorm.split(' ').first() !in msgVerbs) return null
+        // Rohtext ab dem Verb behalten (Gross-/Kleinschreibung der Nachricht)
+        val vi = u.toks.indexOfFirst { it.norm in msgVerbs }
+        if (vi < 0) return null
+        val sub = Utt(u.raw.substring(u.toks[vi].start))
+        val viaMsg = message(sub) as? Intent.Message
+        if (viaMsg != null && (viaMsg.body !is Body.None || viaMsg.channel != null))
+            return viaMsg.copy(channel = viaMsg.channel ?: ch, channelName = viaMsg.channelName.ifBlank { channelLabel(ch) }, sure = true)
+        return looseMessage(sub, ch)
+    }
+
+    private fun channelLabel(c: Channel) = when (c) { Channel.WHATSAPP -> "WhatsApp"; Channel.SMS -> "SMS"; else -> "" }
+
+    private val relWords = setOf("meine", "meiner", "meinem", "meinen", "mein")
+    private val correction = setOf("also", "sprich", "bzw", "beziehungsweise", "respektive", "resp", "äh", "ähm", "ich meine", "das heisst")
+
+    /**
+     * Gesprochene Form ohne «dass» / Doppelpunkt: «schreib Gruja also meine Frau gehen wir zu Pronto».
+     * Empfänger = 1 Wort oder «meine(r) <Person>»; Korrektur nach «also/sprich» hat Vorrang; der Rest ist der Text.
+     */
+    private fun looseMessage(u: Utt, ch: Channel?): Intent? {
+        val toks = u.toks
+        if (toks.size < 4 || toks[0].norm !in setOf("schreib", "schreibe", "schick", "schicke", "sende", "texte")) return null
+        if (bodyMarker(u) >= 0) return null
+        var i = 1
+        var channel = ch
+        fun skipChannel() {
+            while (i < toks.size && (toks[i].norm in setOf("auf", "per", "über", "via", "eine", "nachricht", "app") || channelWords.containsKey(toks[i].norm))) {
+                channelWords[toks[i].norm]?.let { channel = it }; i++
+            }
+        }
+        fun person(): Pair<Int, Int>? {
+            if (i >= toks.size) return null
+            if (toks[i].norm in relWords && i + 1 < toks.size) return i to i + 2
+            if (toks[i].norm in notRecipients || toks[i].norm in headFillers) return null
+            return i to i + 1
+        }
+        skipChannel()
+        var who = person() ?: return null
+        i = who.second
+        skipChannel()
+        // Korrektur: «Gruja also meine Frau»
+        if (i < toks.size && toks[i].norm in correction) {
+            i++
+            if (i < toks.size && toks[i].norm in relWords && i + 1 < toks.size) { who = i to i + 2; i += 2 }
+        }
+        skipChannel()
+        if (toks.size - i < 2) return null
+        val to = u.rawToks(who.first, who.second)
+        val text = u.raw.substring(toks[i].start).trim().trimEnd('.', '!', ' ')
+        return Intent.Message(channel, channel?.let { channelLabel(it) } ?: "", to, Body.Literal(text), sure = channel != null)
     }
 
     // ---------------------------------------------------------------- Anrufen

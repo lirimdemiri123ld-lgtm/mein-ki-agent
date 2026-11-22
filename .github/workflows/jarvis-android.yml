@@ -78,9 +78,8 @@ jobs:
           python3 jarvis-android/tools/tts_test.py "$(ls -d vt/*/ | head -1)"
 
       - name: Unit-Tests (Befehls-Erkennung, Uhrzeiten, Nachrichtentexte)
-        continue-on-error: true
         working-directory: jarvis-android
-        run: gradle testReleaseUnitTest --no-daemon -q 2>&1 | tail -40
+        run: gradle testReleaseUnitTest --no-daemon -q
 
       - name: APK bauen
         working-directory: jarvis-android

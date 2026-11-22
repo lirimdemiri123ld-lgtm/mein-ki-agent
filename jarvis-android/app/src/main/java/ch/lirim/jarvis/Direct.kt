@@ -92,9 +92,23 @@ object Direct {
                 done(out)
             }
             is Cmd.WrongContact -> {
-                if (lastQuery.isBlank()) return Result.PASS
-                Prefs.clearChosenNumber(c, lastQuery)
-                done("Verstanden. Ich habe die gemerkte Nummer für $lastQuery gelöscht und frage beim nächsten Mal wieder nach.")
+                // Nennt Lirim gleich die richtige Nummer («nimm die mit +41 79 …»), wird sie gemerkt
+                val num = Regex("""(?:\+|00)?\d[\d ]{7,}\d""").find(command)?.value?.replace(" ", "")
+                val facts = Memory.factTexts(ctx)
+                val rel = People.relationIn(ch.lirim.jarvis.core.Utt.norm(command))
+                val who = rel?.let { People.relations(facts)[it] } ?: lastQuery
+                if (who.isBlank()) return Result.PASS
+                if (num != null) {
+                    val tail = num.filter { it.isDigit() }.takeLast(9)
+                    val hit = Contacts.searchScored(c, who, 10).map { it.first }
+                        .firstOrNull { it.number.filter { d -> d.isDigit() }.endsWith(tail) }
+                    Prefs.setChosenNumber(c, who, hit?.name ?: who, num)
+                    lastQuery = who
+                    done("Verstanden. Für $who nehme ich ab jetzt ${hit?.name ?: "die Nummer"} mit ${PhoneNumbers.spokenTail(num)} am Ende.")
+                } else {
+                    Prefs.clearChosenNumber(c, who)
+                    done("Verstanden. Ich habe die gemerkte Nummer für $who gelöscht und frage beim nächsten Mal wieder nach.")
+                }
             }
             is Cmd.Message -> message(ctx, svc, command, i)
             is Cmd.OpenApp -> {
@@ -123,7 +137,7 @@ object Direct {
                     cm.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
                 } ?: return Result.PASS
                 cm.setTorchMode(id, i.on)
-                done(if (i.on) "Licht an." else "Licht aus.")
+                done(if (i.on) "Taschenlampe an." else "Taschenlampe aus.")
             }
             is Cmd.Media -> {
                 val am = c.getSystemService(AudioManager::class.java)
