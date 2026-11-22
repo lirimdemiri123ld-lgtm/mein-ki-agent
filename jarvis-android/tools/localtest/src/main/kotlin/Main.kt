@@ -17,7 +17,9 @@ Du bedienst das Handy mit Werkzeugen: app_oeffnen, bildschirm_lesen, tippen (id 
 Regeln:
 - Ist keine Aktion nötig (Frage, Plaudern, Erklärung): antworte direkt mit normalem Text, ohne Werkzeug.
 - Sonst rufe genau EIN Werkzeug auf. Apps öffnen, lesen, scrollen und Wecker stellen geht ohne Rückfrage.
-- Nur vor Senden, Kaufen, Bezahlen, Löschen oder Anrufen zuerst bestaetigen.
+- Nur vor Senden, Kaufen, Bezahlen oder Löschen zuerst bestaetigen. anrufen fragt selbst nach.
+- Personen wie «meine Frau» oder «Baba» löst du mit dem Hintergrundwissen auf und rufst dann anrufen mit dem Namen auf.
+- Sagt Lirim, wer jemand ist (z. B. «Shukrije ist meine Frau»), speichere es mit merken (kategorie person).
 - Ist eine Aktion erledigt, rufe das Werkzeug fertig auf (nachricht = was du getan hast).
 - Das Hintergrundwissen unten nutzt du still. Erwähne es nur, wenn es direkt zur Frage passt.
 - Nie Passwörter oder PINs. Merke dir Dauerhaftes über Lirim mit merken.
@@ -26,12 +28,25 @@ Jetzt: Sonntag, 22. November 2026, 00:10.
     Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
     val base = system.substringBefore("\n\n## Dein")
     val variants = listOf("APP_WIE_NEU" to Pair(base + "\n\nHintergrundwissen über Lirim:\n" + memory.trim(), ""))
-    val known = specs.map { Regex("\"name\":\"([a-z_]+)\"").find(it)!!.groupValues[1] }.toSet()
+    val known: Map<String, List<String>> = specs.associate { sp ->
+        val o = org.json.JSONObject(sp)
+        val props = o.optJSONObject("parameters")?.optJSONObject("properties")
+        val req = o.optJSONObject("parameters")?.optJSONArray("required")
+        val names = mutableListOf<String>()
+        if (req != null) for (i in 0 until req.length()) names.add(req.getString(i))
+        props?.keys()?.forEach { if (it !in names) names.add(it) }
+        o.getString("name") to names
+    }
+    println("=== Parser-Tests")
+    for (t in listOf("merken:kategorie=person,text=gruya als meine Frau abspeichern", "bestaetigen:frage:Ruf meine Frau mal an",
+        "bestaetigen{frage:<|\"|>Soll ich WhatsApp öffnen?<|\"|>}", "fertig", "fertig: Hallo Lirim", "app_oeffnen(name=\"WhatsApp\")",
+        "anrufen: Shukrije", "wecker_stellen:stunde=7,minute=30", "Hallo, wie kann ich helfen?"))
+        println("  «$t» -> ${ToolTextParser.parse(t, known)}")
     Engine(EngineConfig(modelPath = args[0], backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = "/tmp")).use { e ->
         e.initialize()
         for ((vn, v) in variants) {
             println("=== $vn")
-            for (p in listOf("Was kannst du für mich tun?", "Öffne WhatsApp", "Stell einen Wecker um 7 Uhr", "Wie geht es dir?", "Was gibt es Neues?", "Schreib Shukrije auf WhatsApp, dass ich später komme", "Erzähl mir einen Witz")) {
+            for (p in listOf("Was kannst du für mich tun?", "Öffne WhatsApp", "Ruf meine Frau an", "Gruja als meine Frau abspeichern", "Ruf Baba an", "Wie geht es dir?", "Stell einen Wecker um 7 Uhr")) {
                 try {
                     e.createConversation(ConversationConfig(systemInstruction = Contents.of(v.first), tools = tools,
                         automaticToolCalling = false, samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.3))).use { c ->

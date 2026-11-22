@@ -63,6 +63,9 @@ object Prefs {
     fun lastInsightTry(c: Context): Long = p(c).getLong("insight_try", 0L)
     fun setLastInsightTry(c: Context, t: Long) = p(c).edit().putLong("insight_try", t).apply()
 
+    fun askedContacts(c: Context) = p(c).getBoolean("asked_contacts", false)
+    fun setAskedContacts(c: Context) = p(c).edit().putBoolean("asked_contacts", true).apply()
+
     fun webSearch(c: Context): Boolean = p(c).getBoolean("web_search", true)
     fun setWebSearch(c: Context, v: Boolean) = p(c).edit().putBoolean("web_search", v).apply()
 }

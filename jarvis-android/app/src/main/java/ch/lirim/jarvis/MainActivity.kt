@@ -46,6 +46,7 @@ class MainActivity : Activity() {
         private const val REQ_SPEECH = 42
         private const val REQ_PERMS = 43
         private const val REQ_MIC_LISTEN = 44
+        private const val REQ_CONTACTS = 45
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -155,6 +156,11 @@ class MainActivity : Activity() {
         if (crashMode) return
         visible = true
         if (Prefs.wakeWord(this) && !WakeWordService.running && !askedPerms) applyWakeWord()
+        else if (!askedPerms && !Contacts.canRead(this) && !Prefs.askedContacts(this)) {
+            askedPerms = true
+            Prefs.setAskedContacts(this)
+            requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE), REQ_CONTACTS)
+        }
         typer.setAll(lastLines(Agent.fullLog(), 14))
         Agent.listener = { s -> typer.append(s) }
         NotificationStore.listener = { main.post { refreshComms() } }
@@ -671,9 +677,11 @@ class MainActivity : Activity() {
             .setItems(arrayOf(
                 (if (JarvisService.instance != null) "✓ " else "✗ ") + "Bedienungshilfe (Apps bedienen)",
                 (if (NotificationStore.hasAccess(this)) "✓ " else "✗ ") + "Benachrichtigungen (WhatsApp, Mail, SMS lesen)",
-                "Akku: nicht einschränken (für Hintergrund)"
+                "Akku: nicht einschränken (für Hintergrund)",
+                (if (Contacts.canRead(this) && Contacts.canCall(this)) "✓ " else "✗ ") + "Kontakte & Anrufe"
             )) { _, i ->
                 when (i) {
+                    3 -> requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE), REQ_CONTACTS)
                     0 -> openAccessibilitySettings()
                     1 -> startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     2 -> startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)

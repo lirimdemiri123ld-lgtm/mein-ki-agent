@@ -91,6 +91,10 @@ object Tools {
                 .put("app", prop("string", "App-Name, z. B. 'WhatsApp'"))
                 .put("tipp", prop("string", "z. B. 'Neuer Chat: Stift-Symbol unten rechts, dann Name ins Suchfeld'")),
             listOf("app", "tipp")))
+        a.put(tool("kontakt_suchen", "Sucht einen Kontakt im Telefonbuch (Name → Nummer).",
+            JSONObject().put("name", prop("string", "Name oder Teil davon")), listOf("name")))
+        a.put(tool("anrufen", "Ruft einen Kontakt (Name) oder eine Nummer an. Fragt selbst nach Bestätigung.",
+            JSONObject().put("wen", prop("string", "Kontaktname oder Nummer")), listOf("wen")))
         a.put(tool("nachrichten_lesen", "Liest die neuesten Benachrichtigungen (WhatsApp, E-Mail, SMS, andere Apps) mit Absender und Text."))
         a.put(tool("live_daten", "Aktuelles Wetter, Börsenkurse und Handy-Status (Akku, Speicher, RAM)."))
         a.put(tool("projekt_aktualisieren", "Legt ein Projekt von Lirim an oder aktualisiert Fortschritt/Status (erscheint im HUD). fortschritt -1 entfernt das Projekt.",
@@ -124,6 +128,20 @@ object Tools {
                     val tips = Memory.lessonsFor(c, appName)
                     if (tips.isEmpty()) res
                     else ToolOutput(res.text + "\n\nDeine gespeicherten Erfahrungen zu dieser App:\n" + tips)
+                }
+                "kontakt_suchen" -> ToolOutput(Contacts.describe(c, input.optString("name")))
+                "anrufen" -> {
+                    val wen = input.optString("wen").ifBlank { input.optString("name").ifBlank { input.optString("nummer") } }
+                    if (wen.isBlank()) return ToolOutput("Wen soll ich anrufen?")
+                    val hit = Contacts.search(c, wen).firstOrNull()
+                    val label = hit?.let { "${it.name} (${it.number})" } ?: wen
+                    val ov = svc?.overlay
+                    if (ov != null) {
+                        Speaker.say("Soll ich $label anrufen?")
+                        Agent.log("❓ $label anrufen?")
+                        if (!ov.confirm("$label anrufen?")) return ToolOutput("Lirim hat NEIN getippt. Nicht anrufen.")
+                    }
+                    after(svc, Contacts.call(c, hit?.number ?: wen).let { if (hit != null) it.replace(hit.number, "${hit.name}, ${hit.number}") else it }, 1500)
                 }
                 "nachrichten_lesen" -> ToolOutput(NotificationStore.asText(20) +
                     if (!NotificationStore.hasAccess(c)) "\n(Hinweis: Benachrichtigungszugriff ist nicht erteilt.)" else "")

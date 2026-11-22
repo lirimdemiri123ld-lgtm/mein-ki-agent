@@ -45,7 +45,9 @@ Du bedienst das Handy mit Werkzeugen: app_oeffnen, bildschirm_lesen, tippen (id 
 Regeln:
 - Ist keine Aktion nötig (Frage, Plaudern, Erklärung): antworte direkt mit normalem Text, ohne Werkzeug.
 - Sonst rufe genau EIN Werkzeug auf. Apps öffnen, lesen, scrollen und Wecker stellen geht ohne Rückfrage.
-- Nur vor Senden, Kaufen, Bezahlen, Löschen oder Anrufen zuerst bestaetigen.
+- Nur vor Senden, Kaufen, Bezahlen oder Löschen zuerst bestaetigen. anrufen fragt selbst nach.
+- Personen wie «meine Frau» oder «Baba» löst du mit dem Hintergrundwissen auf und rufst dann anrufen mit dem Namen auf.
+- Sagt Lirim, wer jemand ist (z. B. «Shukrije ist meine Frau»), speichere es mit merken (kategorie person).
 - Ist eine Aktion erledigt, rufe das Werkzeug fertig auf (nachricht = was du getan hast).
 - Das Hintergrundwissen unten nutzt du still. Erwähne es nur, wenn es direkt zur Frage passt.
 - Nie Passwörter oder PINs. Merke dir Dauerhaftes über Lirim mit merken.
@@ -57,7 +59,15 @@ Jetzt: $now.
         val specs = toolSpecs(c, hybrid)
         val memory = Memory.promptBlock(c).take(1500).trim()
         val sys = system(c) + if (memory.isNotEmpty()) "\n\nHintergrundwissen über Lirim:\n$memory" else ""
-        val known = specs.mapNotNull { Regex("\"name\":\"([a-z_]+)\"").find(it)?.groupValues?.get(1) }.toSet()
+        val params: Map<String, List<String>> = specs.associate { s ->
+            val o = JSONObject(s)
+            val props = o.optJSONObject("parameters")?.optJSONObject("properties")
+            val req = o.optJSONObject("parameters")?.optJSONArray("required")
+            val names = mutableListOf<String>()
+            if (req != null) for (i in 0 until req.length()) names.add(req.getString(i))
+            props?.keys()?.forEach { if (it !in names) names.add(it) }
+            o.getString("name") to names
+        }
         val steps = mutableListOf<String>()
         var screen = ""
         for (step in 1..MAX_STEPS) {
@@ -80,7 +90,7 @@ Jetzt: $now.
             var name = r.toolName
             var args = r.args
             if (name == null) {
-                val parsed = ToolTextParser.parse(r.text, known)
+                val parsed = ToolTextParser.parse(r.text, params)
                 if (parsed != null) { name = parsed.name; args = parsed.args }
             }
             if (name == null) {
@@ -93,7 +103,10 @@ Jetzt: $now.
             Agent.log("→ [lokal] $name $input")
             when (name) {
                 "fertig" -> {
-                    val msg = input.optString("nachricht").ifBlank { r.text.ifBlank { "Erledigt." } }
+                    val msg = input.optString("nachricht").ifBlank {
+                        ToolTextParser.cleanup(r.text).takeIf { it.isNotBlank() && !it.lowercase().startsWith("fertig") }
+                            ?: if (steps.isNotEmpty()) "Erledigt." else "Wie kann ich dir helfen?"
+                    }
                     remember(command, msg); say(msg); return Result.DONE
                 }
                 "frage_stellen" -> {
