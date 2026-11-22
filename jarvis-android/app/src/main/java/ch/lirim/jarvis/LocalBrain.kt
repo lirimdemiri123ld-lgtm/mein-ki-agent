@@ -89,7 +89,12 @@ object LocalBrain {
 
     fun dir(c: Context): File = File(c.getExternalFilesDir(null) ?: c.filesDir, "models").also { it.mkdirs() }
     fun file(c: Context, m: Model) = File(dir(c), m.file)
-    fun isInstalled(c: Context, m: Model) = file(c, m).let { it.exists() && it.length() >= m.bytes * 0.98 }
+    /** Nur vollständig geladene Dateien zählen (DownloadManager schreibt direkt in die Zieldatei). */
+    fun isInstalled(c: Context, m: Model): Boolean {
+        val f = file(c, m)
+        if (!f.exists() || f.length() != m.bytes) return false
+        return progress(c, m).let { it == -1 || it == 100 }
+    }
 
     fun active(c: Context): Model? {
         val id = Prefs.localModel(c)
@@ -166,8 +171,13 @@ object LocalBrain {
             } catch (t: Throwable) {
                 loading = true
                 Agent.log("GPU nicht verfügbar, nutze CPU (${t.message?.take(80)})")
-                Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = c.cacheDir.path))
-                    .also { it.initialize(); backendName = "CPU" }
+                try {
+                    Engine(EngineConfig(modelPath = path, backend = Backend.CPU(), maxNumTokens = 8192, cacheDir = c.cacheDir.path))
+                        .also { it.initialize(); backendName = "CPU" }
+                } catch (t2: Throwable) {
+                    loading = false
+                    throw IllegalStateException("Ich konnte die Modelldatei nicht öffnen. Ist der Download fertig? Sonst unter GEHIRN löschen und neu laden. (${t2.message?.take(60)})")
+                }
             }
             engine = e
             loadedId = m.id
