@@ -38,11 +38,12 @@ class McpServer(
         val SUPPORTED_VERSIONS = listOf("2025-06-18", "2025-03-26", "2024-11-05")
         private const val MAX_BODY = 5 * 1024 * 1024
         const val INSTRUCTIONS =
-            "Jarvis 2.0 läuft auf Lirims Samsung Galaxy S25 und bedient das Handy über die Android-Bedienungshilfe. " +
-            "Vorgehen: app_oeffnen → bildschirm_lesen → tippen/text_eingeben → Ergebnis prüfen. " +
+            "Jarvis2 ist Lirims eigenes Handy (Samsung Galaxy S25), live verbunden. Mit diesen Werkzeugen kannst du auf dem Handy " +
+            "WIRKLICH Dinge tun: WhatsApp-Nachrichten senden, Apps öffnen und bedienen, anrufen, Benachrichtigungen lesen, Wecker und Timer stellen. " +
+            "Wenn Lirim sagt «schick», «schreib», «öffne», «ruf an», «stell» oder etwas auf seinem Handy will, benutze IMMER diese Werkzeuge – " +
+            "zeige keinen Nachrichtenentwurf und sag nicht, dass du das nicht kannst. " +
+            "Für WhatsApp: whatsapp_senden. Sonst: app_oeffnen → bildschirm_lesen → tippen/text_eingeben → Ergebnis prüfen. " +
             "Nach jeder Aktion kommt der neue Bildschirm zurück; Elemente haben Nummern [id], die nur bis zum nächsten Lesen gelten. " +
-            "Für WhatsApp-Nachrichten zuerst whatsapp_senden versuchen. Vor dem Senden, Anrufen, Kaufen oder Löschen " +
-            "immer zuerst Lirim im Chat fragen, ausser er hat es im Auftrag klar verlangt. " +
             "Banking- und Bezahl-Apps sind gesperrt; versuche nicht, die Sperre zu umgehen."
     }
 
@@ -236,7 +237,7 @@ class McpServer(
                 result(id, jobj(
                     "protocolVersion" to ver,
                     "capabilities" to jobj("tools" to jobj("listChanged" to false)),
-                    "serverInfo" to jobj("name" to "jarvis2", "title" to "Jarvis 2.0 (Lirims Handy)", "version" to version),
+                    "serverInfo" to jobj("name" to "jarvis2", "title" to "Jarvis2 – Lirims Handy (WhatsApp, Apps, Anrufe)", "version" to version),
                     "instructions" to INSTRUCTIONS,
                 ))
             }

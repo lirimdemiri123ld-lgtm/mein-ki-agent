@@ -27,10 +27,10 @@ class PhoneTools(private val svc: JarvisService) : ToolHost {
     )
 
     private val defs: List<JMap> = listOf(
-        tool("apps_auflisten", "Apps auflisten", "Listet alle installierten Apps mit Namen und Paketnamen.", readOnly = true),
-        tool("app_oeffnen", "App öffnen", "Öffnet eine installierte App per Name (z. B. 'WhatsApp', 'Spotify', 'SBB Mobile'). Gibt danach den neuen Bildschirm zurück.",
+        tool("apps_auflisten", "Apps auflisten", "Listet alle Apps auf Lirims Handy mit Namen und Paketnamen.", readOnly = true),
+        tool("app_oeffnen", "App öffnen", "Öffnet auf Lirims Handy eine installierte App per Name (z. B. 'WhatsApp', 'Spotify', 'SBB Mobile'). Gibt danach den neuen Bildschirm zurück.",
             mapOf("name" to p("string", "App-Name oder Paketname")), listOf("name")),
-        tool("bildschirm_lesen", "Bildschirm lesen", "Liest den aktuellen Bildschirm als nummerierte Liste von Elementen [id] mit Text und Eigenschaften (k = klickbar).", readOnly = true),
+        tool("bildschirm_lesen", "Bildschirm lesen", "Liest den aktuellen Bildschirm von Lirims Handy als nummerierte Liste von Elementen [id] mit Text und Eigenschaften (k = klickbar).", readOnly = true),
         tool("screenshot", "Screenshot", "Macht ein Bild vom Bildschirm. Nutzen, wenn die Elementliste leer oder unklar ist (z. B. Spiele, Karten, Bilder).", readOnly = true),
         tool("tippen", "Tippen", "Tippt auf ein Element: per Nummer (id) aus bildschirm_lesen ODER per sichtbarem Text.",
             mapOf("id" to p("integer", "Nummer des Elements"), "text" to p("string", "sichtbarer Text, z. B. Name eines Chats"))),
@@ -55,11 +55,12 @@ class PhoneTools(private val svc: JarvisService) : ToolHost {
             mapOf("url" to p("string", "Adresse")), listOf("url")),
         tool("kontakt_suchen", "Kontakt suchen", "Sucht einen Kontakt im Telefonbuch (Name → Nummer). Findet auch ungefähre Schreibweisen.",
             mapOf("name" to p("string", "Name oder Teil davon")), listOf("name"), readOnly = true),
-        tool("whatsapp_senden", "WhatsApp senden", "Schickt eine WhatsApp-Nachricht an einen Kontakt (Name) oder eine Nummer. " +
+        tool("whatsapp_senden", "WhatsApp senden (Handy)", "Sendet eine ECHTE WhatsApp-Nachricht von Lirims Handy an einen Kontakt (Name, z. B. 'Gruja') oder eine Nummer. " +
+            "Immer verwenden, wenn Lirim sagt «schick/schreib X auf WhatsApp» – statt eines Nachrichtenentwurfs. " +
             "Öffnet den Chat, füllt den Text ein und tippt auf Senden. Mit senden=false wird nur vorbereitet.",
             mapOf("an" to p("string", "Kontaktname oder Telefonnummer"), "text" to p("string", "Nachricht"),
                 "senden" to p("boolean", "Standard true; false = nur vorbereiten")), listOf("an", "text")),
-        tool("anrufen", "Anrufen", "Ruft einen Kontakt (Name) oder eine Nummer an.",
+        tool("anrufen", "Anrufen", "Startet auf Lirims Handy einen Anruf an einen Kontakt (Name) oder eine Nummer.",
             mapOf("wen" to p("string", "Kontaktname oder Nummer")), listOf("wen")),
         tool("nachrichten_lesen", "Benachrichtigungen lesen", "Liest die neuesten Benachrichtigungen (WhatsApp, E-Mail, SMS, andere Apps) mit Absender und Text.",
             mapOf("anzahl" to p("integer", "Wie viele, Standard 15")), readOnly = true),
