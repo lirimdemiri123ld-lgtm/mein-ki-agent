@@ -79,7 +79,8 @@ class MainActivity : Activity() {
             toast("Installierte Apps → Jarvis 2.0 → einschalten. Grau? Siehe Hinweis unten.")
         })
         box.addView(button("Kontakte & Anrufe erlauben") {
-            requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE), 1)
+            requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS,
+                Manifest.permission.CALL_PHONE, Manifest.permission.READ_MEDIA_IMAGES), 1)
         })
         box.addView(button("Benachrichtigungen lesen erlauben") {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -187,6 +188,7 @@ class MainActivity : Activity() {
             "${mark(server)} MCP-Server ${if (server) "läuft (Port ${Prefs.PORT})" else "läuft nicht"}",
             "${mark(Prefs.tunnelUrl(this).isNotEmpty())} Tunnel-Adresse ${if (Prefs.tunnelUrl(this).isNotEmpty()) "gespeichert" else "fehlt – unter 2"}",
             "${mark(Contacts.canRead(this))} Kontakte",
+            "${mark(ContactPhoto.canWrite(this) && ContactPhoto.canReadImages(this))} Kontaktbilder ändern (Fotos + Kontakte)",
             "${mark(NotificationListener.hasAccess(this))} Benachrichtigungen",
             if (Prefs.paused(this)) "⏸ PAUSIERT – Claude kann nichts tun" else "▶ Bereit für Aufträge von Claude",
         )

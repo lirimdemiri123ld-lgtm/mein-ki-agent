@@ -60,6 +60,13 @@ class PhoneTools(private val svc: JarvisService) : ToolHost {
             "Öffnet den Chat, füllt den Text ein und tippt auf Senden. Mit senden=false wird nur vorbereitet.",
             mapOf("an" to p("string", "Kontaktname oder Telefonnummer"), "text" to p("string", "Nachricht"),
                 "senden" to p("boolean", "Standard true; false = nur vorbereiten")), listOf("an", "text")),
+        tool("kontaktbild_setzen", "Kontaktbild setzen (Handy)", "Setzt in einem Schritt das Profilbild (rundes Bild) eines Kontakts auf Lirims Handy – " +
+            "IMMER statt durch die Kontakte-App zu klicken. Nimmt das NEUESTE Bild der Galerie (optional nur aus einem Ordner, z. B. 'WhatsApp'). " +
+            "Ablauf bei «nimm das letzte Bild von X»: Bild in WhatsApp öffnen, oben auf Speichern (Pfeil) tippen, dann dieses Werkzeug aufrufen. " +
+            "Mit nur_zeigen=true wird das Bild nur angezeigt und nichts geändert. Die Samsung-Profilkarte (grosses Hintergrundbild) kann Android nicht setzen.",
+            mapOf("kontakt" to p("string", "Kontaktname, z. B. 'Nana Swisscom'"),
+                "ordner" to p("string", "Optional: nur Bilder aus diesem Galerie-Ordner, z. B. 'WhatsApp'"),
+                "nur_zeigen" to p("boolean", "true = nur Vorschau des gewählten Bilds, nichts ändern")), listOf("kontakt")),
         tool("anrufen", "Anrufen", "Startet auf Lirims Handy einen Anruf an einen Kontakt (Name) oder eine Nummer.",
             mapOf("wen" to p("string", "Kontaktname oder Nummer")), listOf("wen")),
         tool("nachrichten_lesen", "Benachrichtigungen lesen", "Liest die neuesten Benachrichtigungen (WhatsApp, E-Mail, SMS, andere Apps) mit Absender und Text.",
@@ -129,6 +136,7 @@ class PhoneTools(private val svc: JarvisService) : ToolHost {
             }
             "kontakt_suchen" -> ToolResult(Contacts.describe(svc, args.str("name")))
             "whatsapp_senden" -> whatsapp(args.str("an"), args.str("text"), args.bool("senden", true))
+            "kontaktbild_setzen" -> contactPhoto(args.str("kontakt"), args.str("ordner"), args.bool("nur_zeigen"))
             "anrufen" -> ToolResult(Contacts.call(svc, args.str("wen")))
             "nachrichten_lesen" -> ToolResult(
                 NotificationListener.asText(args.int("anzahl", 15).coerceIn(1, 60)) +
@@ -162,6 +170,24 @@ class PhoneTools(private val svc: JarvisService) : ToolHost {
         if (Safety.blocked(fg)) return ToolResult("$msg\n\n${Safety.reason(Apps.labelFor(svc, fg))}")
         val failed = msg.startsWith("Fehler") || msg.contains("fehlgeschlagen") || msg.startsWith("Kein")
         return ToolResult("$msg\n\nAktueller Bildschirm:\n${svc.readScreen()}", isError = failed)
+    }
+
+    private fun contactPhoto(who: String, folder: String, previewOnly: Boolean): ToolResult {
+        if (who.isBlank()) return ToolResult("Kontaktname fehlt.", isError = true)
+        if (!ContactPhoto.canReadImages(svc) || !ContactPhoto.canWrite(svc))
+            return ToolResult("Jarvis 2.0 darf Galerie oder Kontakte noch nicht ändern. Lirim muss in Jarvis 2.0 «Kontakte & Anrufe erlauben» " +
+                "nochmals antippen und «Fotos» sowie «Kontakte» erlauben.", isError = true)
+        val (hit, err) = Contacts.resolve(svc, who)
+        if (hit == null || Contacts.looksLikeNumber(who)) return ToolResult(err ?: "Bitte einen Kontaktnamen angeben, keine Nummer.", isError = true)
+        val img = ContactPhoto.newestImage(svc, folder.takeIf { it.isNotBlank() && it != "null" })
+            ?: return ToolResult("Kein Bild in der Galerie gefunden" + (if (folder.isNotBlank()) " (Ordner «$folder»)." else "."), isError = true)
+        val ageMin = (System.currentTimeMillis() / 1000 - img.addedSec) / 60
+        val info = "Bild: ${img.name} (Ordner ${img.folder}, vor $ageMin Min. gespeichert)"
+        val thumb = try { ContactPhoto.preview(svc, img.uri) } catch (_: Exception) { null }
+        if (previewOnly) return ToolResult("Vorschau – nichts geändert.\n$info", thumb)
+        val (ok, e) = try { ContactPhoto.set(svc, hit.name, img.uri) } catch (ex: Exception) { 0 to (ex.message ?: "Fehler") }
+        return if (ok > 0) ToolResult("Profilbild von ${hit.name} gesetzt.\n$info", thumb)
+        else ToolResult(e ?: "Bild konnte nicht gesetzt werden.", thumb, isError = true)
     }
 
     private fun whatsapp(to: String, text: String, send: Boolean): ToolResult {
